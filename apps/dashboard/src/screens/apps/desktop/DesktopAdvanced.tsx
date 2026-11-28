@@ -112,7 +112,7 @@ function WingetFacts({ f, readOnly }: { f: FormApi; readOnly: boolean }) {
   const [version, setVersion] = useState("");
   const [state, setState] = useState<{ pending: boolean; error: string | null; done: string | null }>({ pending: false, error: null, done: null });
   const r = x.resolved;
-  async function useVersion() {
+  async function applyVersion() {
     if (!r) return;
     setState({ pending: true, error: null, done: null });
     try {
@@ -147,7 +147,7 @@ function WingetFacts({ f, readOnly }: { f: FormApi; readOnly: boolean }) {
             {(p) => (
               <div className="apps-check__row">
                 <Input {...p} className="dash-mono" spellCheck={false} autoCapitalize="off" placeholder={r.version} value={version} onChange={(ev) => setVersion(ev.target.value)} />
-                <Button type="button" variant="ghost" disabled={state.pending || version.trim() === ""} aria-busy={state.pending} onClick={() => void useVersion()}>
+                <Button type="button" variant="ghost" disabled={state.pending || version.trim() === ""} aria-busy={state.pending} onClick={() => void applyVersion()}>
                   {state.pending ? e.resolving : t.useVersion}
                 </Button>
               </div>

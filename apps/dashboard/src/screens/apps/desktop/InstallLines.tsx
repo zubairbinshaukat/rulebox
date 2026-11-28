@@ -15,7 +15,7 @@ const t = appAddStrings;
  * comes from, what happens on removal, the version. Each line has an (i) with the sentence behind it; a warning stays visible under
  * its line. Technical values (hashes, switches, sizes) are not here: they live under Advanced.
  */
-export function InstallLines({ lines, children }: { lines: readonly Line[]; children?: ReactNode }) {
+export function InstallLines({ lines, onVersion, children }: { lines: readonly Line[]; /** "Change" next to the version line. */ onVersion?: () => void; children?: ReactNode }) {
   if (lines.length === 0 && !children) return null;
   return (
     <ul className="apps-lines" aria-label={t.review.summary}>
@@ -31,6 +31,11 @@ export function InstallLines({ lines, children }: { lines: readonly Line[]; chil
             </span>
             {line.note ? <span className="apps-line__note">{line.note}</span> : null}
           </span>
+          {line.id === "version" && onVersion ? (
+            <button type="button" className="apps-line__change" onClick={onVersion}>
+              {t.lines.versionChange}
+            </button>
+          ) : null}
         </li>
       ))}
       {children}

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { settleApp } from "./apps/testKit";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { getFunctionName, type FunctionReference } from "convex/server";
@@ -51,8 +52,8 @@ import AppEdit from "./AppEdit";
 
 const admin: Me = { email: "admin@x.test", role: "admin", status: "active", orgId: "org", orgName: "Acme", pin: { required: true, set: true }, serverApiVersion: 1 };
 
-function ui(node: ReactNode, role: Me["role"], path: string) {
-  return render(
+async function ui(node: ReactNode, role: Me["role"], path: string) {
+  const result = render(
     <ToastProvider>
       <MeContext.Provider value={{ ...admin, role }}>
         <MemoryRouter initialEntries={[path]}>
@@ -64,6 +65,8 @@ function ui(node: ReactNode, role: Me["role"], path: string) {
       </MeContext.Provider>
     </ToastProvider>,
   );
+  await settleApp();
+  return result;
 }
 
 beforeEach(() => {
@@ -110,7 +113,7 @@ describe("AppEdit: the feed status line's buttons", () => {
     const dismiss = vi.fn(async () => ({ revision: 5 }));
     cx.fns["feeds:approve"] = approve;
     cx.fns["feeds:dismiss"] = dismiss;
-    ui(<AppEdit />, "admin", "/apps/a2");
+    await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
     expect(await screen.findByText(s.feedStatusPending("2.1.0"))).toBeTruthy();
     fireEvent.click(button(s.feedApprove));
     await waitFor(() => expect(approve).toHaveBeenCalledWith({ appId: "a2", expectedRevision: 5 }));
@@ -123,7 +126,7 @@ describe("AppEdit: the feed status line's buttons", () => {
   it("a stale_edit on Approve is one plain sentence under the line", async () => {
     cx.results["apps:get"] = managed(offered);
     cx.fns["feeds:approve"] = vi.fn().mockRejectedValue(new ConvexError({ code: "stale_edit" }));
-    ui(<AppEdit />, "admin", "/apps/a2");
+    await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
     fireEvent.click(await screen.findByRole("button", { name: s.feedApprove }));
     expect(await screen.findByText(s.feedStale)).toBeTruthy();
   });
@@ -132,7 +135,7 @@ describe("AppEdit: the feed status line's buttons", () => {
     cx.results["apps:get"] = managed(calm);
     const check = vi.fn(async () => ({ result: "pending", status: "ok", version: "2.1.0" }));
     cx.fns["feeds:checkNow"] = check;
-    ui(<AppEdit />, "admin", "/apps/a2");
+    await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
     await screen.findByText(s.feedStatusWorking);
     expect(screen.queryByRole("button", { name: s.feedApprove })).toBeNull();
     expect(screen.queryByRole("button", { name: s.feedDismiss })).toBeNull();
@@ -144,7 +147,7 @@ describe("AppEdit: the feed status line's buttons", () => {
   it("Check now's refusals: too soon (rate_limited) and paused (conflict) each have their own sentence", async () => {
     cx.results["apps:get"] = managed(calm);
     cx.fns["feeds:checkNow"] = vi.fn().mockRejectedValue(new ConvexError({ code: "rate_limited", retryAfterMs: 300000 }));
-    ui(<AppEdit />, "admin", "/apps/a2");
+    await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
     fireEvent.click(await screen.findByRole("button", { name: s.feedCheckNow }));
     expect(await screen.findByText(s.feedCheckTooSoon)).toBeTruthy();
     cx.fns["feeds:checkNow"] = vi.fn().mockRejectedValue(new ConvexError({ code: "conflict", detail: "paused" }));
@@ -156,12 +159,12 @@ describe("AppEdit: the feed status line's buttons", () => {
     cx.results["apps:get"] = managed(calm);
     const setPaused = vi.fn(async () => null);
     cx.fns["feeds:setPaused"] = setPaused;
-    ui(<AppEdit />, "admin", "/apps/a2");
+    await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
     fireEvent.click(await screen.findByRole("button", { name: s.feedPause }));
     await waitFor(() => expect(setPaused).toHaveBeenCalledWith({ appId: "a2", paused: true }));
     cleanup();
     cx.results["apps:get"] = managed({ status: "paused", failures: 0, lastCheckedAt: Date.now() - 60_000 });
-    ui(<AppEdit />, "admin", "/apps/a2");
+    await ui(<AppEdit />, "admin", "/apps/a2?tab=updates");
     await screen.findByText(s.feedStatusProblem.paused);
     expect((button(s.feedCheckNow) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(button(s.feedResume));
@@ -170,14 +173,14 @@ describe("AppEdit: the feed status line's buttons", () => {
 
   it("a viewer sees the status line and none of the buttons", async () => {
     cx.results["apps:get"] = managed(offered);
-    ui(<AppEdit />, "viewer", "/apps/a2");
+    await ui(<AppEdit />, "viewer", "/apps/a2?tab=updates");
     await screen.findByText(s.feedStatusPending("2.1.0"));
     for (const name of [s.feedApprove, s.feedDismiss, s.feedCheckNow, s.feedPause]) expect(screen.queryByRole("button", { name })).toBeNull();
   });
 });
 
 describe("Apps list: updateFlag", () => {
-  it("shows 'Update waiting' and 'Feed problem' next to the app, and nothing for an app without a flag", () => {
+  it("shows 'Update waiting' and 'Feed problem' next to the app, and nothing for an app without a flag", async () => {
     cx.results["apps:list"] = {
       page: [
         { _id: "a1", name: "Docs", kind: "web", archived: false, groupCount: 0, groupCountMore: false, summary: null },
@@ -187,7 +190,7 @@ describe("Apps list: updateFlag", () => {
       isDone: true,
       continueCursor: "c:3",
     };
-    ui(<Apps />, "viewer", "/apps");
+    await ui(<Apps />, "viewer", "/apps");
     expect(screen.getByText(appsStrings.updateFlag.available)).toBeTruthy();
     expect(screen.getByText(appsStrings.updateFlag.feed_error)).toBeTruthy();
     expect(screen.getAllByText(/^(Update waiting|Feed problem)$/)).toHaveLength(2);
@@ -195,7 +198,7 @@ describe("Apps list: updateFlag", () => {
 });
 
 describe("audit label", () => {
-  it("app.feedRejected has a plain label (convex/audit.test.ts checks every Phase 5 and 6 action has one)", () => {
+  it("app.feedRejected has a plain label (convex/audit.test.ts checks every Phase 5 and 6 action has one)", async () => {
     expect(auditStrings.actions["app.feedRejected"]).toBe("Vendor update refused");
     expect(actionLabel("app.feedRejected")).toBe("Vendor update refused");
   });

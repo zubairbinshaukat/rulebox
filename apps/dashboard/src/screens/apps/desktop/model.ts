@@ -4,9 +4,9 @@
  * from winget's install location). No React, so every rule is a plain test.
  */
 import { prefillFor } from "@convex/lib/installerDetect";
-import type { AppDetail, DesktopSpec, InstallerInspection, WingetResolved, WizardTech } from "../../../data/types";
+import type { AppDetail, DesktopSpec, InstallerInspection, WingetResolved } from "../../../data/types";
 import { appAddStrings } from "../../../lib/screenStrings/appAdd";
-import { silentStatus, switchesEdited, type SilentStatus } from "../../../lib/apps/silentMode";
+import { silentStatus, type SilentStatus } from "../../../lib/apps/silentMode";
 import { storedTech } from "../../../lib/apps/installerRules";
 import * as v from "../../../lib/validate";
 import type { FormValues } from "../appForm";
@@ -97,6 +97,13 @@ export function linesOf(x: FormValues, inspection: InstallerInspection | null): 
   return { silent, lines };
 }
 
+/** `{ProgramFiles}\VideoLAN\VLC\vlc.exe` for a person: `Program Files\VideoLAN\VLC\vlc.exe`. */
+export function friendlyPath(exe: string): string {
+  const roots = t.program.roots;
+  const root = Object.keys(roots).find((r) => exe.startsWith(r));
+  return root === undefined ? exe : `${roots[root]}\\${exe.slice(root.length)}`;
+}
+
 /** `{ProgramFiles}\VideoLAN\VLC` (winget's install folder) as the start of a program path; the person adds the file name. */
 export function exeFolderOf(location: string | undefined): string | null {
   if (location === undefined) return null;
@@ -125,11 +132,16 @@ export function wingetFill(r: WingetResolved, entry: GalleryApp | undefined, x: 
   };
 }
 
-/** A name for an app from the file it installs: `pos-setup-2.4.exe` becomes "Pos setup 2.4". Empty when the file name says nothing. */
+/** A name for an app from the file it installs: `pos-setup-2.4.exe` becomes "Pos 2 4". Empty when the file name says nothing. */
 export function nameFromUrl(url: string): string {
   try {
     const last = decodeURIComponent(new URL(url.trim()).pathname.split("/").filter(Boolean).pop() ?? "");
-    const base = last.replace(/\.(exe|msi)$/i, "").replace(/[-_.]+/g, " ").replace(/\b(setup|installer|install|x64|x86|win64|win32|amd64)\b/gi, " ").replace(/\s+/g, " ").trim();
+    const base = last
+      .replace(/\.(exe|msi)$/i, "")
+      .replace(/[-_]+/g, " ")
+      .replace(/\b(setup|installer|install|x64|x86|win64|win32|amd64)\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
     if (base === "") return "";
     return base.charAt(0).toUpperCase() + base.slice(1);
   } catch {
@@ -137,15 +149,10 @@ export function nameFromUrl(url: string): string {
   }
 }
 
-/** The text of a vendor's name usable in "Usually under Program Files\<company>" (no trademark marks, no company suffix). */
+/** A vendor's name usable in "Usually under Program Files\<company>" (no trademark marks, no company suffix). */
 export function companyFolder(company: string | undefined): string | null {
   const c = (company ?? "").replace(/[™®©]/g, "").replace(/,?\s+(inc|ltd|llc|gmbh|corp|corporation|co|limited|s\.?a\.?|b\.?v\.?)\.?$/i, "").trim();
   return c === "" || /[\\/:*?"<>|]/.test(c) ? null : c;
-}
-
-/** `true` when the program path still is just a root with no file (nothing to show collapsed). */
-export function exeIsBlank(exe: string): boolean {
-  return v.exePath(exe, false) !== null;
 }
 
 /**
@@ -162,6 +169,3 @@ export function checkedBefore(url: string, sha256: string, sizeBytes: number): D
     install: { kind: "exe", url: url.trim(), sha256: sha256.toLowerCase(), sizeBytes, silentArgs: [], successExitCodes: [0], removeWhenUnassigned: false },
   };
 }
-
-export { switchesEdited };
-export type { WizardTech };

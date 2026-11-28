@@ -31,8 +31,10 @@ export default function AddAppStart() {
 
   const query = text.trim();
   const apps = useMemo(() => searchGallery(query, query === "" ? category : "all"), [query, category]);
-  const site = siteOf(text);
   const winget = wingetIdOf(text);
+  // `VideoLAN.VLC` has the shape of an address, but with capitals and no scheme it is a package id: only the catalogue row is offered.
+  const asId = winget !== null && !/^https?:/i.test(query) && /[A-Z]/.test(query);
+  const site = asId ? null : siteOf(text);
 
   // Enter picks the one thing the text can only mean: a single popular app, else the winget id (when it has capitals or is a link) or the site.
   function enter(e: KeyboardEvent<HTMLDivElement>) {

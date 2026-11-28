@@ -71,6 +71,7 @@ export const appInstallerStrings = {
   answerSha: "Answer file SHA-256",
   // ---- UI pass: the "Install command" group inside Advanced. Labels keep their technical names; long hints are (i) texts.
   advancedGroup: "Install command",
+  silentArgs: "Silent install switches",
   automatic: "Automatic",
   useAutomatic: "Use automatic",
   change: "Change",

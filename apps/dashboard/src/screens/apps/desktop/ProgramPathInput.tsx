@@ -3,15 +3,10 @@ import { Button, Input, Select } from "@rulebox/ui";
 import { Field } from "../../../components/Field";
 import { appAddStrings } from "../../../lib/screenStrings/appAdd";
 import * as v from "../../../lib/validate";
+import { friendlyPath } from "./model";
 
 const t = appAddStrings.program;
 const ROOTS = Object.keys(t.roots);
-
-/** `{ProgramFiles}\VideoLAN\VLC\vlc.exe` for a person: `Program Files\VideoLAN\VLC\vlc.exe`. */
-export function friendlyPath(exe: string): string {
-  const root = ROOTS.find((r) => exe.startsWith(r));
-  return root === undefined ? exe : `${t.roots[root]}\\${exe.slice(root.length)}`;
-}
 
 /**
  * "Program to start": the .exe the PC runs when an employee opens the app, as a folder picker plus the rest of the path

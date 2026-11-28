@@ -2,6 +2,7 @@ import { n } from "../strings";
 
 export const appEditStrings = {
   back: "All apps",
+  tabsLabel: "Sections of this app",
   newWebTitle: "Add a website",
   newDesktopTitle: "Add a Windows program",
   kind: "Type",

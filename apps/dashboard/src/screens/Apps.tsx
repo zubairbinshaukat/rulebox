@@ -4,6 +4,7 @@ import { Pill, SegmentedControl } from "@rulebox/ui";
 import IconWidget from "~icons/solar/widget-2-linear";
 import IconGlobal from "~icons/solar/global-linear";
 import IconMonitor from "~icons/solar/monitor-linear";
+import IconAdd from "~icons/solar/add-circle-linear";
 import { useAppsCount, useAppsScreen } from "../data/apps";
 import type { AppRow, InstallSummary } from "../data/types";
 import { AppGlyph } from "../components/AppGlyph";
@@ -111,13 +112,9 @@ export default function Apps() {
 
   const add = (
     <RoleGate minRole="admin">
-      <Link to="/apps/new?kind=web" className="rb-btn rb-btn--ghost">
-        <IconGlobal aria-hidden="true" />
-        {s.addWeb}
-      </Link>
-      <Link to="/apps/new?kind=desktop" className="rb-btn rb-btn--primary">
-        <IconMonitor aria-hidden="true" />
-        {s.addDesktop}
+      <Link to="/apps/new" className="rb-btn rb-btn--primary">
+        <IconAdd aria-hidden="true" />
+        {s.add}
       </Link>
     </RoleGate>
   );
@@ -151,7 +148,7 @@ export default function Apps() {
           archived ? (
             <EmptyState icon={<IconWidget />} title={s.emptyArchivedTitle} body={s.emptyArchivedBody} />
           ) : (
-            <EmptyState icon={<IconWidget />} title={s.emptyTitle} body={s.emptyBody} action={add} />
+            <EmptyState icon={<IconWidget />} title={s.emptyTitle} body={s.emptyBodyAdd} action={add} />
           )
         }
       />

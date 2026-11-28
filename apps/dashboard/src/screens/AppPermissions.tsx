@@ -26,12 +26,17 @@ export function AppPermissions({
   d,
   revision,
   readOnly,
+  draft,
+  onDraft,
   onSaved,
   onReload,
 }: {
   d: AppDetail;
   revision: number;
   readOnly: boolean;
+  /** The switches as edited: kept by the page, so a tab switch does not lose them. */
+  draft: WebPermissions;
+  onDraft: (next: WebPermissions | ((prev: WebPermissions) => WebPermissions)) => void;
   onSaved: (revision: number) => void;
   onReload: () => void;
 }) {
@@ -42,7 +47,7 @@ export function AppPermissions({
   const setPermissions = useSetAppPermissions();
   const toast = useToast();
   const list = useRef<HTMLUListElement>(null);
-  const [draft, setDraft] = useState<WebPermissions>(saved);
+  const setDraft = onDraft;
   const [highlight, setHighlight] = useState<keyof WebPermissions | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<unknown>(null);

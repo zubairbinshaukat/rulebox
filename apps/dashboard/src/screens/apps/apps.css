@@ -1,0 +1,840 @@
+/*
+ * Add app, Windows app review and the app page (UI pass 2026-11, docs/plans/ui-pass/add-app.md). Shipped in the lazy chunks of those
+ * screens, not in the entry CSS. Tokens only. The only motion is a fade and a lift (opacity + transform), none with reduced motion or Lite.
+ * Width bands: phone < 600 · tablet 600-1023 · laptop 1024-1599 · wide >= 1600; the grids lay themselves out by their own width.
+ */
+
+.apps-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* ------------------------------------------------------------ start page */
+
+.apps-start__main {
+  container: apps-main / inline-size;
+  gap: 16px;
+}
+.apps-start__search .dash-search {
+  max-width: none;
+}
+.apps-start__search .rb-input {
+  min-height: 52px;
+  font-size: 16px;
+  border-radius: var(--rb-r-lg);
+}
+
+/* Category chips: one row that scrolls sideways on a phone and fades out at the edge. */
+.apps-chips {
+  display: flex;
+  gap: 6px;
+  margin-inline: calc(-1 * var(--dash-gutter));
+  padding: 2px var(--dash-gutter);
+  overflow-x: auto;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: var(--dash-gutter);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--dash-gutter), #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 var(--dash-gutter), #000 calc(100% - 28px), transparent);
+}
+.apps-chips::-webkit-scrollbar {
+  display: none;
+}
+@media (min-width: 640px) {
+  .apps-chips {
+    margin-inline: 0;
+    padding-inline: 0;
+    flex-wrap: wrap;
+    overflow: visible;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+.apps-chip {
+  flex: none;
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid var(--rb-line);
+  border-radius: 999px;
+  background: var(--rb-surface);
+  color: var(--rb-ink);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  scroll-snap-align: start;
+  transition:
+    background var(--rb-duration) var(--rb-ease),
+    border-color var(--rb-duration) var(--rb-ease);
+}
+.apps-chip:hover {
+  background: var(--rb-hover);
+}
+.apps-chip[aria-pressed="true"] {
+  background: var(--rb-accent);
+  border-color: var(--rb-accent);
+  color: var(--rb-on-ink);
+}
+.apps-chip:focus-visible,
+.apps-card:focus-visible,
+.apps-way__link:focus-visible,
+.apps-switch:focus-visible {
+  outline: 2px solid var(--rb-focus);
+  outline-offset: 2px;
+}
+
+/* The grid of popular apps: as many columns of at least 150 px as the column is wide. */
+.apps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.apps-grid__item {
+  min-width: 0;
+  animation: dash-enter 220ms cubic-bezier(0.33, 1, 0.68, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 18ms);
+}
+.apps-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  width: 100%;
+  height: 100%;
+  min-height: 148px;
+  padding: 16px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-lg);
+  background: var(--rb-surface);
+  color: var(--rb-ink);
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: var(--dash-card-shadow);
+  transition:
+    transform var(--rb-duration) var(--rb-ease),
+    box-shadow var(--rb-duration) var(--rb-ease),
+    border-color var(--rb-duration) var(--rb-ease);
+}
+.apps-card:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: var(--rb-accent);
+  box-shadow: var(--rb-shadow-md);
+}
+.apps-card:active:not(:disabled) {
+  transform: translateY(0);
+}
+.apps-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.apps-card .dash-glyph {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  font-size: 20px;
+}
+.apps-card__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+}
+.apps-card__name {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.apps-card__blurb {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--rb-muted);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.apps-card__badge {
+  position: absolute;
+  top: 14px;
+  inset-inline-end: 14px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+.apps-trademarks {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--rb-muted);
+}
+
+/* Extra results for what was typed: the website and the winget id. */
+.apps-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* "Other ways to add". On a tablet the ways sit side by side under the grid; on a laptop they are a column on the right. */
+.apps-ways {
+  container: apps-ways / inline-size;
+  padding: 18px;
+}
+.apps-ways__title {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 650;
+}
+.apps-ways__list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@container apps-ways (min-width: 520px) {
+  .apps-ways__list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.apps-ways__more {
+  margin-top: 10px;
+}
+.apps-ways__more > summary {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--rb-muted);
+  cursor: pointer;
+  list-style: none;
+}
+.apps-ways__more > summary::-webkit-details-marker {
+  display: none;
+}
+.apps-ways__more > summary:hover {
+  color: var(--rb-ink);
+}
+.apps-ways__more[open] > .apps-ways__list {
+  margin-top: 6px;
+}
+.apps-way {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.apps-way__link {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 60px;
+  padding: 10px 12px;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-md);
+  background: var(--rb-paper);
+  color: var(--rb-ink);
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background var(--rb-duration) var(--rb-ease),
+    border-color var(--rb-duration) var(--rb-ease);
+}
+.apps-way__link:hover:not(:disabled) {
+  background: var(--rb-hover);
+  border-color: var(--rb-line-strong);
+}
+.apps-way__link:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.apps-way__icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 19px;
+}
+.apps-way__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.apps-way__label {
+  font-size: 14.5px;
+  font-weight: 620;
+}
+.apps-way__hint {
+  font-size: 12.5px;
+  color: var(--rb-muted);
+}
+.apps-way__go {
+  flex: none;
+  color: var(--rb-muted);
+  transition: transform var(--rb-duration) var(--rb-ease);
+}
+.apps-way__link:hover:not(:disabled) .apps-way__go {
+  transform: translateX(3px);
+}
+
+/* ------------------------------------------------------------ add page (Windows app review) */
+
+/* One grid, three areas: the summary, the form and the Add bar. Phone and tablet: one column (tablet centred, at most 680 px), the Add bar
+   sticks to the bottom of the window. Laptop: the form on the left, the summary and the Add bar on the right. */
+.apps-add__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "summary" "main" "bar";
+  gap: 16px;
+  min-width: 0;
+  width: 100%;
+  max-width: 680px;
+  margin-inline: auto;
+}
+.apps-add__summary {
+  grid-area: summary;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+}
+.apps-add__who {
+  min-width: 0;
+}
+.apps-add__name {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.apps-add__by {
+  margin: 1px 0 0;
+  font-size: 13px;
+  color: var(--rb-muted);
+}
+.apps-add__main {
+  grid-area: main;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.apps-add__looking {
+  margin: 0 0 10px;
+}
+.apps-add__bar {
+  grid-area: bar;
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-inline: calc(-1 * var(--dash-gutter));
+  padding: 12px var(--dash-gutter) calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--rb-line);
+  background: var(--rb-glass-strong);
+  -webkit-backdrop-filter: blur(var(--rb-blur));
+  backdrop-filter: blur(var(--rb-blur));
+}
+.apps-add__bar .rb-btn--primary {
+  width: 100%;
+}
+.apps-add__why {
+  margin: 0;
+  font-size: 13px;
+  color: var(--rb-muted);
+  text-align: center;
+}
+@media (min-width: 600px) {
+  .apps-add__bar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+  }
+  .apps-add__bar > :where(.dash-notice) {
+    flex: 1 1 100%;
+  }
+  .apps-add__bar .rb-btn--primary {
+    width: auto;
+  }
+  .apps-add__why {
+    flex: 1 1 100%;
+    order: 3;
+    text-align: end;
+  }
+}
+@media (min-width: 1024px) {
+  .apps-add__grid {
+    max-width: none;
+    margin-inline: 0;
+    grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas: "main summary" "main bar";
+    align-items: start;
+    gap: 18px 22px;
+  }
+  .apps-add__summary {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 22px;
+  }
+  .apps-add__summary .dash-glyph {
+    width: 72px;
+    height: 72px;
+    border-radius: 20px;
+    font-size: 30px;
+  }
+  .apps-add__name {
+    white-space: normal;
+    font-size: 20px;
+  }
+  .apps-add__bar {
+    position: sticky;
+    top: calc(var(--dash-topbar) + 16px);
+    bottom: auto;
+    flex-direction: column;
+    align-items: stretch;
+    margin-inline: 0;
+    padding: 16px;
+    border: 1px solid var(--rb-line);
+    border-radius: var(--dash-radius);
+    background: var(--rb-surface);
+    box-shadow: var(--dash-card-shadow);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .apps-add__bar .rb-btn--primary {
+    width: 100%;
+  }
+  .apps-add__why {
+    order: 0;
+    text-align: center;
+  }
+}
+
+/* ------------------------------------------------------------ status lines */
+
+.apps-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--rb-line);
+  border-radius: var(--rb-r-lg);
+  background: var(--rb-paper);
+}
+.apps-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--rb-r-md);
+}
+.apps-line__icon {
+  flex: none;
+  display: inline-flex;
+  margin-top: 1px;
+  font-size: 19px;
+  color: var(--rb-muted);
+}
+.apps-line[data-tone="success"] .apps-line__icon {
+  color: var(--rb-success);
+}
+.apps-line[data-tone="warning"] .apps-line__icon,
+.apps-line__icon[data-tone="warning"] {
+  color: var(--rb-warning-text);
+}
+.apps-line__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.apps-line__label {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 14.5px;
+  font-weight: 560;
+}
+.apps-line__note {
+  font-size: 13px;
+  color: var(--rb-warning-text);
+}
+.apps-line__change {
+  flex: none;
+  align-self: center;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--rb-accent-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.apps-line__change:hover {
+  background: var(--rb-hover);
+}
+
+/* A plain installer nobody recognised: a warning with a way forward. */
+.apps-unknown {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--rb-warning);
+  border-radius: var(--rb-r-lg);
+  background: var(--rb-warning-soft);
+}
+.apps-unknown__head {
+  display: flex;
+  gap: 10px;
+}
+.apps-unknown__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  font-weight: 650;
+  color: var(--rb-warning-text);
+}
+.apps-unknown__body {
+  margin: 2px 0 0;
+  font-size: 13.5px;
+}
+.apps-unknown__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+.apps-unknown__label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.apps-unknown__chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.apps-unknown__hint {
+  flex: 1 1 100%;
+  font-size: 12.5px;
+  color: var(--rb-muted);
+}
+.apps-switch {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--rb-line-strong);
+  border-radius: 8px;
+  background: var(--rb-surface);
+  color: var(--rb-ink);
+  font-family: var(--rb-font-mono);
+  font-size: 13px;
+  cursor: pointer;
+}
+.apps-switch:hover {
+  background: var(--rb-hover);
+}
+
+/* ------------------------------------------------------------ program to start, installer link */
+
+.apps-starts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 4px 4px 4px 14px;
+  border: 1px dashed var(--rb-line-strong);
+  border-radius: var(--rb-r-md);
+}
+.apps-starts__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--rb-muted);
+}
+.apps-starts__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.apps-program__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.apps-program__root {
+  flex: 0 1 210px;
+  min-width: 0;
+}
+.apps-program__sep {
+  color: var(--rb-muted);
+  font-family: var(--rb-font-mono);
+}
+.apps-program__rest {
+  flex: 1;
+  min-width: 0;
+}
+@media (max-width: 479px) {
+  .apps-program__row {
+    flex-wrap: wrap;
+  }
+  .apps-program__root {
+    flex: 1 1 100%;
+  }
+  .apps-program__sep {
+    display: none;
+  }
+}
+.apps-check {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.apps-check__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.apps-check__row > .rb-input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.apps-check__file {
+  flex: none;
+}
+.apps-check__busy {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--rb-r-md);
+  background: var(--rb-accent-soft);
+  color: var(--rb-accent-text);
+  font-size: 14px;
+}
+
+/* ------------------------------------------------------------ more options, advanced */
+
+.apps-more,
+.apps-advanced {
+  background: transparent;
+}
+.apps-modes {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.apps-switchrow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.apps-facts {
+  margin-bottom: 8px;
+}
+.apps-fact__value {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.apps-version__field {
+  max-width: 460px;
+}
+.apps-command .dash-form-grid__full {
+  min-width: 0;
+}
+.apps-command__answer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ------------------------------------------------------------ the app page */
+
+.apps-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.apps-page {
+  gap: 16px;
+}
+.apps-aside__source {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+.apps-aside__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+}
+.apps-aside__link {
+  margin: 12px 0 0;
+}
+.apps-direct {
+  padding: 12px 22px 16px;
+  font-size: 13px;
+}
+.apps-states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@media (min-width: 1024px) {
+  .apps-states {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .apps-states .dash-state-btn {
+    justify-content: space-between;
+  }
+}
+.apps-perms {
+  display: grid;
+  gap: 18px;
+  align-items: start;
+}
+@media (min-width: 1024px) {
+  .apps-perms {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+}
+.apps-updates {
+  min-width: 0;
+  max-width: 920px;
+}
+
+/* One save bar for Details and Updates: it sticks to the bottom of the window while there are unsaved changes. */
+.apps-savebar {
+  position: sticky;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid var(--rb-line-strong);
+  border-radius: var(--rb-r-lg);
+  background: var(--rb-glass-strong);
+  box-shadow: var(--rb-shadow-lg);
+  -webkit-backdrop-filter: blur(var(--rb-blur));
+  backdrop-filter: blur(var(--rb-blur));
+  animation: dash-enter 200ms cubic-bezier(0.33, 1, 0.68, 1) backwards;
+}
+.apps-savebar__notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.apps-savebar__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 10px;
+}
+.apps-savebar__text {
+  flex: 1 1 140px;
+  font-size: 14px;
+  font-weight: 600;
+}
+@media (max-width: 599px) {
+  .apps-savebar {
+    bottom: calc(8px + env(safe-area-inset-bottom));
+  }
+  .apps-savebar__row .rb-btn {
+    flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .apps-grid__item,
+  .apps-savebar {
+    animation-name: dash-fade-in;
+    animation-duration: 150ms;
+    animation-delay: 0s;
+  }
+  .apps-card,
+  .apps-way__go {
+    transition: none;
+  }
+  .apps-card:hover:not(:disabled),
+  .apps-way__link:hover:not(:disabled) .apps-way__go {
+    transform: none;
+  }
+}
+[data-lite="true"] .apps-grid__item,
+[data-lite="true"] .apps-savebar {
+  animation-name: dash-fade-in;
+  animation-duration: 150ms;
+  animation-delay: 0s;
+}
+[data-lite="true"] .apps-card,
+[data-lite="true"] .apps-way__go {
+  transition: none;
+}
+[data-lite="true"] .apps-card:hover:not(:disabled),
+[data-lite="true"] .apps-way__link:hover:not(:disabled) .apps-way__go {
+  transform: none;
+}

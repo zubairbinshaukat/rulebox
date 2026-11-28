@@ -177,7 +177,7 @@ export function useInstallerCheck(f: FormApi): InstallerCheck {
           const now = latest.current;
           const typed = now.sha256.trim().toLowerCase();
           let line: string | null = null;
-          if (typed === "" || typed === state.current.autoSha) {
+          if (typed === "") {
             set("sha256", checked.sha256);
             state.current.autoSha = checked.sha256;
             setSizeBytes(checked.sizeBytes);

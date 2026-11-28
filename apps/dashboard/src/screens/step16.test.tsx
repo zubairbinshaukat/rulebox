@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { settleApp } from "./apps/testKit";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { getFunctionName, type FunctionReference } from "convex/server";
@@ -9,6 +10,7 @@ import { strings } from "../lib/strings";
 import { appEditStrings } from "../lib/screenStrings/appEdit";
 import { appBrowserStrings, browserRefusalStrings } from "../lib/screenStrings/appBrowser";
 import { appUpdateStrings } from "../lib/screenStrings/appUpdates";
+import { appAddStrings } from "../lib/screenStrings/appAdd";
 import { BROWSER_BLOCKED_PERMISSIONS, MAX_BROWSER_SITES, browserSitesProblem } from "../lib/apps/browserRules";
 
 // Phase 6 Step 16: browser web apps on the App screen against the LIVE data seam with the Convex React hooks mocked, like step10.test.tsx
@@ -64,8 +66,8 @@ const admin: Me = {
   serverApiVersion: 1,
 };
 
-function ui(role: Me["role"], path: string) {
-  return render(
+async function ui(role: Me["role"], path: string) {
+  const result = render(
     <ToastProvider>
       <MeContext.Provider value={{ ...admin, role }}>
         <MemoryRouter initialEntries={[path]}>
@@ -77,6 +79,8 @@ function ui(role: Me["role"], path: string) {
       </MeContext.Provider>
     </ToastProvider>,
   );
+  await settleApp();
+  return result;
 }
 
 beforeEach(() => {
@@ -119,7 +123,7 @@ const switches = () => within(permCard()).getAllByRole("switch") as HTMLButtonEl
 const KEYS = ["camera", "microphone", "screenShare", "clipboardRead", "notifications", "downloads", "printing", "geolocation"] as const;
 
 describe("rules (lib/apps/browserRules.ts)", () => {
-  it("allowed sites: domains only, lower case, at most 200 distinct", () => {
+  it("allowed sites: domains only, lower case, at most 200 distinct", async () => {
     expect(browserSitesProblem(["a.example.com", "*.b.example.com"], "many")).toBeNull();
     expect(browserSitesProblem(["https://a.example.com"], "many")).not.toBeNull();
     expect(browserSitesProblem(Array.from({ length: MAX_BROWSER_SITES + 1 }, (_, i) => `s${i}.example.com`), "many")).toBe("many");
@@ -128,7 +132,7 @@ describe("rules (lib/apps/browserRules.ts)", () => {
     expect(browserSitesProblem(Array.from({ length: 300 }, () => "a.example.com"), "many")).toBeNull();
   });
 
-  it("the permissions that do nothing in a browser are screen sharing, clipboard read, downloads and location", () => {
+  it("the permissions that do nothing in a browser are screen sharing, clipboard read, downloads and location", async () => {
     expect([...BROWSER_BLOCKED_PERMISSIONS].sort()).toEqual(["clipboardRead", "downloads", "geolocation", "screenShare"]);
   });
 });
@@ -137,7 +141,7 @@ describe("AppEdit: Opens in (a website)", () => {
   it("starts on the Rulebox window with its help and the fallback note; no browser list, no program query, and Save sends no browser", async () => {
     const create = vi.fn<(input: unknown) => Promise<string>>(async () => "a9");
     cx.fns["apps:createWeb"] = create;
-    ui("admin", "/apps/new?kind=web");
+    await ui("admin", "/apps/new?kind=web");
     expect(opensIn(appBrowserStrings.kinds.builtin).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByText(appBrowserStrings.kindHelp.builtin)).toBeTruthy();
     expect(screen.getByText(appBrowserStrings.fallbackNote)).toBeTruthy();
@@ -153,7 +157,7 @@ describe("AppEdit: Opens in (a website)", () => {
   it("Edge shows the plain list of what browser mode cannot do; Save sends { kind: edge }", async () => {
     const create = vi.fn<(input: unknown) => Promise<string>>(async () => "a9");
     cx.fns["apps:createWeb"] = create;
-    ui("admin", "/apps/new?kind=web");
+    await ui("admin", "/apps/new?kind=web");
     fireEvent.click(opensIn(appBrowserStrings.kinds.edge));
     expect(screen.getByText(appBrowserStrings.kindHelp.edge)).toBeTruthy();
     expect(screen.getByText(appBrowserStrings.limitsTitle)).toBeTruthy();
@@ -171,7 +175,7 @@ describe("AppEdit: Opens in (a website)", () => {
     cx.results["apps:options"] = options;
     const create = vi.fn<(input: unknown) => Promise<string>>(async () => "a9");
     cx.fns["apps:createWeb"] = create;
-    ui("admin", "/apps/new?kind=web");
+    await ui("admin", "/apps/new?kind=web");
     expect(queried("apps:options")).toEqual([]);
     fireEvent.click(opensIn(appBrowserStrings.kinds.chrome));
     expect(queried("apps:options").length).toBeGreaterThan(0);
@@ -188,9 +192,9 @@ describe("AppEdit: Opens in (a website)", () => {
     expect(create.mock.calls[0]![0]).toMatchObject({ browser: { kind: "chrome", appId: "c2" } });
   });
 
-  it("with no Chrome program yet it says so and links to Add a Windows program", () => {
+  it("with no Chrome program yet it says so and links to Add a Windows program", async () => {
     cx.results["apps:options"] = options.filter((o) => o.browser !== "chrome");
-    ui("admin", "/apps/new?kind=web");
+    await ui("admin", "/apps/new?kind=web");
     fireEvent.click(opensIn(appBrowserStrings.kinds.chrome));
     expect(screen.getByText(appBrowserStrings.chromeNone)).toBeTruthy();
     expect(screen.getByRole("link", { name: appBrowserStrings.chromeAdd }).getAttribute("href")).toBe("/apps/new?kind=desktop");
@@ -201,7 +205,7 @@ describe("AppEdit: Opens in (a website)", () => {
     cx.results["apps:options"] = options;
     const update = vi.fn<(input: unknown) => Promise<{ revision: number }>>(async () => ({ revision: 4 }));
     cx.fns["apps:update"] = update;
-    ui("admin", "/apps/a1");
+    await ui("admin", "/apps/a1");
     expect(opensIn(appBrowserStrings.kinds.chrome).getAttribute("aria-checked")).toBe("true");
     expect((screen.getByLabelText(new RegExp(`^${appBrowserStrings.chromeApp}`)) as HTMLSelectElement).value).toBe("c1");
     expect(screen.queryByText(appBrowserStrings.chromeUnusable("Google Chrome"))).toBeNull();
@@ -216,21 +220,21 @@ describe("AppEdit: Opens in (a website)", () => {
     expect((update.mock.calls[1]![0] as { web: object }).web).not.toHaveProperty("browser");
   });
 
-  it("an archived or deleted Chrome program is a warning on the app page: PCs use the Rulebox window", () => {
+  it("an archived or deleted Chrome program is a warning on the app page: PCs use the Rulebox window", async () => {
     cx.results["apps:options"] = options;
     cx.results["apps:get"] = website({ chromeApp: { _id: "c9", name: "Old Chrome", usable: false } }, { browser: { kind: "chrome", appId: "c9" } });
-    ui("admin", "/apps/a1");
+    await ui("admin", "/apps/a1");
     expect(screen.getByText(appBrowserStrings.chromeUnusable("Old Chrome"))).toBeTruthy();
     cleanup();
     cx.results["apps:get"] = website({}, { browser: { kind: "chrome", appId: "c9" } });
-    ui("admin", "/apps/a1");
+    await ui("admin", "/apps/a1");
     expect(screen.getByText(appBrowserStrings.chromeGone)).toBeTruthy();
   });
 
   it("the server's refusal is one sentence", async () => {
     cx.results["apps:options"] = options;
     cx.fns["apps:createWeb"] = vi.fn().mockRejectedValue(new ConvexError({ code: "invalid_argument", field: "browser", detail: "browser_app_required" }));
-    ui("admin", "/apps/new?kind=web");
+    await ui("admin", "/apps/new?kind=web");
     fireEvent.click(opensIn(appBrowserStrings.kinds.chrome));
     fireEvent.change(field(appEditStrings.name), { target: { value: "Docs" } });
     fireEvent.change(field(appEditStrings.url), { target: { value: "https://docs.example.com" } });
@@ -239,25 +243,25 @@ describe("AppEdit: Opens in (a website)", () => {
     expect(await screen.findByText(browserRefusalStrings.browser_app_required)).toBeTruthy();
   });
 
-  it("a viewer cannot change it", () => {
+  it("a viewer cannot change it", async () => {
     cx.results["apps:get"] = website({}, { browser: { kind: "edge" } });
-    ui("viewer", "/apps/a1");
+    await ui("viewer", "/apps/a1");
     expect(opensIn(appBrowserStrings.kinds.edge).getAttribute("aria-checked")).toBe("true");
     expect(opensIn(appBrowserStrings.kinds.builtin).matches(":disabled")).toBe(true);
   });
 });
 
 describe("AppEdit: permissions in browser mode (plan 4.9.3, Step 16 item 4)", () => {
-  it("Rulebox window: all eight switches work, no browser note", () => {
+  it("Rulebox window: all eight switches work, no browser note", async () => {
     cx.results["apps:get"] = website();
-    ui("admin", "/apps/a1");
+    await ui("admin", "/apps/a1");
     expect(switches().every((s) => !s.disabled)).toBe(true);
     expect(screen.queryByText(appBrowserStrings.permissionsBrowserNote("Edge"))).toBeNull();
   });
 
-  it("Edge: screen sharing, clipboard, downloads and location are off, disabled and say why; camera, microphone, notifications and printing still work", () => {
+  it("Edge: screen sharing, clipboard, downloads and location are off, disabled and say why; camera, microphone, notifications and printing still work", async () => {
     cx.results["apps:get"] = website({}, { browser: { kind: "edge" } });
-    ui("admin", "/apps/a1");
+    await ui("admin", "/apps/a1");
     expect(screen.getByText(appBrowserStrings.permissionsBrowserNote("Edge"))).toBeTruthy();
     const sw = switches();
     KEYS.forEach((key, i) => {
@@ -277,7 +281,7 @@ describe("AppEdit: permissions in browser mode (plan 4.9.3, Step 16 item 4)", ()
     cx.results["apps:get"] = website({}, { browser: { kind: "chrome", appId: "c1" } });
     const save = vi.fn(async () => ({ revision: 4 }));
     cx.fns["apps:setPermissions"] = save;
-    ui("admin", "/apps/a1");
+    await ui("admin", "/apps/a1");
     expect(screen.getByText(appBrowserStrings.permissionsBrowserNote("Chrome"))).toBeTruthy();
     fireEvent.click(switches()[0]!); // camera on
     fireEvent.click(screen.getByRole("button", { name: appEditStrings.permissionsSave }));
@@ -285,14 +289,14 @@ describe("AppEdit: permissions in browser mode (plan 4.9.3, Step 16 item 4)", ()
     expect(save).toHaveBeenCalledWith({ appId: "a1", expectedRevision: 3, permissions: { ...perms, camera: true } });
   });
 
-  it("no Allow button for a blocked kind in browser mode; the others keep theirs", () => {
+  it("no Allow button for a blocked kind in browser mode; the others keep theirs", async () => {
     cx.results["apps:get"] = website({ denials30d: [{ kind: "screenShare", count: 4 }, { kind: "camera", count: 2 }] }, { browser: { kind: "edge" } });
-    ui("admin", "/apps/a1");
+    await ui("admin", "/apps/a1");
     expect(screen.queryByRole("button", { name: appEditStrings.allowKind("Screen sharing") })).toBeNull();
     expect(screen.getByRole("button", { name: appEditStrings.allowKind("Camera") })).toBeTruthy();
     cleanup();
     cx.results["apps:get"] = website({ denials30d: [{ kind: "screenShare", count: 4 }] });
-    ui("admin", "/apps/a1");
+    await ui("admin", "/apps/a1");
     expect(screen.getByRole("button", { name: appEditStrings.allowKind("Screen sharing") })).toBeTruthy();
   });
 });
@@ -318,16 +322,16 @@ describe("AppEdit: Browser rules (Chrome or Edge as a program, plan 4.9.7)", () 
 
   it("Chrome and Edge programs get the card with the plain list; another program does not, and its Save sends no browserSites", async () => {
     cx.results["apps:get"] = program(CHROME, { browserSites: ["portal.example.com", "*.cdn.example.com"] });
-    ui("admin", "/apps/p1");
-    await screen.findByText(appUpdateStrings.updates);
+    await ui("admin", "/apps/p1");
+    await screen.findByRole("tab", { name: appAddStrings.tabs.updates });
     expect(screen.getByText(appBrowserStrings.rules)).toBeTruthy();
     expect(field(appBrowserStrings.sites).value).toBe("portal.example.com\n*.cdn.example.com");
     for (const line of appBrowserStrings.limits) expect(screen.getByText(line)).toBeTruthy();
     cleanup();
 
     cx.results["apps:get"] = program("{ProgramFiles}\\Microsoft\\Edge\\Application\\msedge.exe");
-    ui("admin", "/apps/p1");
-    await screen.findByText(appUpdateStrings.updates);
+    await ui("admin", "/apps/p1");
+    await screen.findByRole("tab", { name: appAddStrings.tabs.updates });
     expect(screen.getByText(appBrowserStrings.rules)).toBeTruthy();
     expect(screen.getByText(appBrowserStrings.sitesEmpty)).toBeTruthy(); // no list: only the browser's blocked page
     cleanup();
@@ -335,9 +339,10 @@ describe("AppEdit: Browser rules (Chrome or Edge as a program, plan 4.9.7)", () 
     const update = vi.fn<(input: unknown) => Promise<{ revision: number }>>(async () => ({ revision: 6 }));
     cx.fns["apps:update"] = update;
     cx.results["apps:get"] = program("{ProgramFiles}\\Writer\\writer.exe", { update: undefined });
-    ui("admin", "/apps/p1");
-    await screen.findByText(appUpdateStrings.updates);
+    await ui("admin", "/apps/p1");
+    await screen.findByRole("tab", { name: appAddStrings.tabs.updates });
     expect(screen.queryByText(appBrowserStrings.rules)).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: /^Name/ }), { target: { value: "Writer 2" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
     expect((update.mock.calls[0]![0] as { desktop: { desktop: object } }).desktop.desktop).not.toHaveProperty("browserSites");
@@ -347,7 +352,7 @@ describe("AppEdit: Browser rules (Chrome or Edge as a program, plan 4.9.7)", () 
     cx.results["apps:get"] = program(CHROME);
     const update = vi.fn<(input: unknown) => Promise<{ revision: number }>>(async () => ({ revision: 6 }));
     cx.fns["apps:update"] = update;
-    ui("admin", "/apps/p1");
+    await ui("admin", "/apps/p1");
     await screen.findByText(appUpdateStrings.updates);
     fireEvent.change(field(appBrowserStrings.sites), { target: { value: "  Portal.Example.com \n*.cdn.example.com\nportal.example.com\n\n" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
@@ -363,7 +368,7 @@ describe("AppEdit: Browser rules (Chrome or Edge as a program, plan 4.9.7)", () 
     cx.results["apps:get"] = program(CHROME);
     const update = vi.fn(async () => ({ revision: 6 }));
     cx.fns["apps:update"] = update;
-    ui("admin", "/apps/p1");
+    await ui("admin", "/apps/p1");
     await screen.findByText(appUpdateStrings.updates);
     fireEvent.change(field(appBrowserStrings.sites), { target: { value: "https://portal.example.com/x" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
@@ -377,7 +382,7 @@ describe("AppEdit: Browser rules (Chrome or Edge as a program, plan 4.9.7)", () 
   it("the server's refusal for a program that is not a browser is one sentence", async () => {
     cx.results["apps:get"] = program(CHROME);
     cx.fns["apps:update"] = vi.fn().mockRejectedValue(new ConvexError({ code: "invalid_argument", field: "browserSites", detail: "not_a_browser_app" }));
-    ui("admin", "/apps/p1");
+    await ui("admin", "/apps/p1");
     await screen.findByText(appUpdateStrings.updates);
     fireEvent.change(field(appBrowserStrings.sites), { target: { value: "portal.example.com" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
