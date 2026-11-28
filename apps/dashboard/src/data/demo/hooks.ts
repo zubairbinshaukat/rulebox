@@ -1929,7 +1929,8 @@ export const demoApi: DataApi = {
               ...(browser ? { browser } : {}),
             },
             archived: false,
-            revision: 1,
+            // The server's createWeb starts a website at revision 0.
+            revision: 0,
             createdAt: now,
           });
           audit({ action: "app.created", targetType: "app", targetId: id, targetLabel: name, summary: `Website “${name}” added.` });

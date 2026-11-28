@@ -13,8 +13,9 @@ import { strings } from "../lib/strings";
 const AddAppStart = lazy(() => import("./apps/AddAppStart"));
 const DesktopAdd = lazy(() => import("./apps/desktop/DesktopAdd"));
 const AppPage = lazy(() => import("./apps/page/AppPage"));
-// Websites keep today's single-page form until the website form with the site-access picker takes their place inside `AppPage`.
-const LegacyWebEdit = lazy(() => import("./apps/LegacyWebEdit"));
+// Websites: the add page and `AppPage` with the website form (site-access picker) as its Details tab.
+const WebAdd = lazy(() => import("./apps/web/WebAdd"));
+const WebAppPage = lazy(() => import("./apps/web/WebAppPage"));
 
 const wait = (
   <div className="dash-page" data-suspense="">
@@ -35,7 +36,9 @@ export default function AppEdit() {
   const detail = useAppDetail(isNew ? "new" : id);
   const kind = params.get("kind");
 
-  if (isNew && kind !== "web") return <Suspense fallback={wait}>{kind === "desktop" ? <DesktopAdd /> : <AddAppStart />}</Suspense>;
+  if (isNew) {
+    return <Suspense fallback={wait}>{kind === "desktop" ? <DesktopAdd /> : kind === "web" ? <WebAdd /> : <AddAppStart />}</Suspense>;
+  }
 
   return (
     <div className="dash-page">
@@ -45,7 +48,7 @@ export default function AppEdit() {
       <QueryRegion state={detail} skeleton={<div className="dash-card dash-card--pad"><SkeletonBlock lines={6} /></div>}>
         {(d) => (
           <Suspense fallback={<div className="dash-card dash-card--pad" data-suspense=""><SkeletonBlock lines={6} /></div>}>
-            {isNew || d.kind === "web" ? <LegacyWebEdit key={d._id} d={d} isNew={isNew} /> : <AppPage key={d._id} d={d} />}
+            {d.kind === "web" ? <WebAppPage key={d._id} d={d} /> : <AppPage key={d._id} d={d} />}
           </Suspense>
         )}
       </QueryRegion>

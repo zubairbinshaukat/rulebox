@@ -5,6 +5,9 @@ import { DEFAULT_WEB_PERMISSIONS, type AppDetail, type DesktopAppInput, type Web
 import { AppGlyph } from "../../../components/AppGlyph";
 import { Field } from "../../../components/Field";
 import { FormError } from "../../../components/FormError";
+
+/** A website's address and allowed-sites refusals show under those fields (the website form), not twice in the save bar. */
+const WEB_FIELDS = ["allowedDomains", "url"] as const;
 import { InlineNotice } from "../../../components/Notice";
 import { PageHeader } from "../../../components/PageHeader";
 import { PageTabPanel, PageTabs, type PageTab } from "../../../components/PageTabs";
@@ -200,7 +203,7 @@ function Body({
 
       {f.dirty && !readOnly ? (
         <SaveBar pending={f.pending} onSave={() => void f.submit(save)} onDiscard={() => onRestart()}>
-          <FormError error={f.serverError} onReload={() => onRestart()} />
+          <FormError error={f.serverError} fields={d.kind === "web" ? WEB_FIELDS : undefined} onReload={() => onRestart()} />
           {errors.length > 0 ? (
             <InlineNotice
               tone="danger"
@@ -216,7 +219,7 @@ function Body({
           ) : null}
         </SaveBar>
       ) : f.serverError ? (
-        <FormError error={f.serverError} onReload={() => onRestart()} />
+        <FormError error={f.serverError} fields={d.kind === "web" ? WEB_FIELDS : undefined} onReload={() => onRestart()} />
       ) : null}
     </div>
   );

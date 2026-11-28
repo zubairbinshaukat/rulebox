@@ -148,8 +148,8 @@ describe("AppEdit: Opens in (a website)", () => {
     expect(screen.queryByText(appBrowserStrings.limitsTitle)).toBeNull();
     expect(queried("apps:options")).toEqual([]); // nothing is subscribed until Chrome is picked
     fireEvent.change(field(appEditStrings.name), { target: { value: "Docs" } });
-    fireEvent.change(field(appEditStrings.url), { target: { value: "https://docs.example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
+    fireEvent.change(field(appAddStrings.web.address), { target: { value: "https://docs.example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: appAddStrings.web.add }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).not.toHaveProperty("browser");
   });
@@ -164,8 +164,8 @@ describe("AppEdit: Opens in (a website)", () => {
     for (const line of appBrowserStrings.limits) expect(screen.getByText(line)).toBeTruthy();
     expect(queried("apps:options")).toEqual([]); // Edge needs no program
     fireEvent.change(field(appEditStrings.name), { target: { value: "Docs" } });
-    fireEvent.change(field(appEditStrings.url), { target: { value: "https://docs.example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
+    fireEvent.change(field(appAddStrings.web.address), { target: { value: "https://docs.example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: appAddStrings.web.add }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).toMatchObject({ url: "https://docs.example.com", browser: { kind: "edge" } });
     expect((create.mock.calls[0]![0] as { browser: object }).browser).not.toHaveProperty("appId");
@@ -182,12 +182,12 @@ describe("AppEdit: Opens in (a website)", () => {
     const picker = screen.getByLabelText(new RegExp(`^${appBrowserStrings.chromeApp}`)) as HTMLSelectElement;
     expect(within(picker).getAllByRole("option").map((o) => o.textContent)).toEqual([appBrowserStrings.chromeAppPick, "Google Chrome", "Chrome Beta"]);
     fireEvent.change(field(appEditStrings.name), { target: { value: "Docs" } });
-    fireEvent.change(field(appEditStrings.url), { target: { value: "https://docs.example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
+    fireEvent.change(field(appAddStrings.web.address), { target: { value: "https://docs.example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: appAddStrings.web.add }));
     expect(await screen.findByText(appBrowserStrings.chromeNeeded)).toBeTruthy();
     expect(create).not.toHaveBeenCalled();
     fireEvent.change(picker, { target: { value: "c2" } });
-    fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
+    fireEvent.click(screen.getByRole("button", { name: appAddStrings.web.add }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]![0]).toMatchObject({ browser: { kind: "chrome", appId: "c2" } });
   });
@@ -209,6 +209,8 @@ describe("AppEdit: Opens in (a website)", () => {
     expect(opensIn(appBrowserStrings.kinds.chrome).getAttribute("aria-checked")).toBe("true");
     expect((screen.getByLabelText(new RegExp(`^${appBrowserStrings.chromeApp}`)) as HTMLSelectElement).value).toBe("c1");
     expect(screen.queryByText(appBrowserStrings.chromeUnusable("Google Chrome"))).toBeNull();
+    // The save bar shows once something changed.
+    fireEvent.change(field(appEditStrings.name), { target: { value: "Docs 2" } });
     fireEvent.click(screen.getByRole("button", { name: strings.common.saveChanges }));
     await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
     expect(update.mock.calls[0]![0]).toMatchObject({ appId: "a1", expectedRevision: 3, web: { browser: { kind: "chrome", appId: "c1" } } });
@@ -237,9 +239,9 @@ describe("AppEdit: Opens in (a website)", () => {
     await ui("admin", "/apps/new?kind=web");
     fireEvent.click(opensIn(appBrowserStrings.kinds.chrome));
     fireEvent.change(field(appEditStrings.name), { target: { value: "Docs" } });
-    fireEvent.change(field(appEditStrings.url), { target: { value: "https://docs.example.com" } });
+    fireEvent.change(field(appAddStrings.web.address), { target: { value: "https://docs.example.com" } });
     fireEvent.change(screen.getByLabelText(new RegExp(`^${appBrowserStrings.chromeApp}`)), { target: { value: "c1" } });
-    fireEvent.click(screen.getByRole("button", { name: strings.common.create }));
+    fireEvent.click(screen.getByRole("button", { name: appAddStrings.web.add }));
     expect(await screen.findByText(browserRefusalStrings.browser_app_required)).toBeTruthy();
   });
 
@@ -254,14 +256,14 @@ describe("AppEdit: Opens in (a website)", () => {
 describe("AppEdit: permissions in browser mode (plan 4.9.3, Step 16 item 4)", () => {
   it("Rulebox window: all eight switches work, no browser note", async () => {
     cx.results["apps:get"] = website();
-    await ui("admin", "/apps/a1");
+    await ui("admin", "/apps/a1?tab=permissions");
     expect(switches().every((s) => !s.disabled)).toBe(true);
     expect(screen.queryByText(appBrowserStrings.permissionsBrowserNote("Edge"))).toBeNull();
   });
 
   it("Edge: screen sharing, clipboard, downloads and location are off, disabled and say why; camera, microphone, notifications and printing still work", async () => {
     cx.results["apps:get"] = website({}, { browser: { kind: "edge" } });
-    await ui("admin", "/apps/a1");
+    await ui("admin", "/apps/a1?tab=permissions");
     expect(screen.getByText(appBrowserStrings.permissionsBrowserNote("Edge"))).toBeTruthy();
     const sw = switches();
     KEYS.forEach((key, i) => {
@@ -281,7 +283,7 @@ describe("AppEdit: permissions in browser mode (plan 4.9.3, Step 16 item 4)", ()
     cx.results["apps:get"] = website({}, { browser: { kind: "chrome", appId: "c1" } });
     const save = vi.fn(async () => ({ revision: 4 }));
     cx.fns["apps:setPermissions"] = save;
-    await ui("admin", "/apps/a1");
+    await ui("admin", "/apps/a1?tab=permissions");
     expect(screen.getByText(appBrowserStrings.permissionsBrowserNote("Chrome"))).toBeTruthy();
     fireEvent.click(switches()[0]!); // camera on
     fireEvent.click(screen.getByRole("button", { name: appEditStrings.permissionsSave }));
@@ -291,12 +293,12 @@ describe("AppEdit: permissions in browser mode (plan 4.9.3, Step 16 item 4)", ()
 
   it("no Allow button for a blocked kind in browser mode; the others keep theirs", async () => {
     cx.results["apps:get"] = website({ denials30d: [{ kind: "screenShare", count: 4 }, { kind: "camera", count: 2 }] }, { browser: { kind: "edge" } });
-    await ui("admin", "/apps/a1");
+    await ui("admin", "/apps/a1?tab=permissions");
     expect(screen.queryByRole("button", { name: appEditStrings.allowKind("Screen sharing") })).toBeNull();
     expect(screen.getByRole("button", { name: appEditStrings.allowKind("Camera") })).toBeTruthy();
     cleanup();
     cx.results["apps:get"] = website({ denials30d: [{ kind: "screenShare", count: 4 }] });
-    await ui("admin", "/apps/a1");
+    await ui("admin", "/apps/a1?tab=permissions");
     expect(screen.getByRole("button", { name: appEditStrings.allowKind("Screen sharing") })).toBeTruthy();
   });
 });

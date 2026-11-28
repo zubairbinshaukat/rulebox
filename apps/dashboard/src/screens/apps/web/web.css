@@ -478,7 +478,7 @@
 .web-prev__list[hidden] {
   display: none;
 }
-@container web-prev (min-width: 520px) {
+@container web-prev (min-width: 640px) {
   .web-prev__list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
