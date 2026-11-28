@@ -4,7 +4,6 @@ import {
   MAX_LOCKOUT_MINUTES,
   MAX_LOCKOUT_THRESHOLD,
   MIN_LOCKOUT_THRESHOLD,
-  OPEN_FINDINGS_CAP,
   type AppControlLevel,
   type ExceptionKind,
   type FindingLayer,
@@ -52,13 +51,16 @@ export const lockdownStrings = {
   allUpToDate: (total: number) => (total === 1 ? "This PC is up to date." : `All ${total} PCs are up to date.`),
   sending: (upToDate: number, total: number) => (total === 1 ? `Sending: ${upToDate} of 1 PC has it` : `Sending: ${upToDate} of ${total} PCs have it`),
   waiting: (count: number) => `${count} waiting`,
+  syncDetails: "Details",
+  syncHide: "Hide details",
+  syncBar: "PCs up to date",
   waitingInfo: "A PC gets the change the next time it is online. Rulebox never restarts a PC on its own.",
   problems: (count: number) => `${count} could not apply it:`,
   problemsInfo: "Open the PC to see why. Nothing was changed on it.",
   noPcs: "No PCs in this group yet.",
   noPcsAction: "Add a PC",
   notSent: "Not sent yet. Your PCs get these settings when you save.",
-  ringsOn: "Rollout rings are on: pilot PCs get changes first.",
+  ringsOn: "Rollout rings are on. Your first PCs get changes before the rest.",
   ringsHalted: "The rollout is paused. Other PCs wait until you resume it.",
   ringsAction: "Open rollout",
   reduced: (count: number) =>
@@ -91,6 +93,7 @@ export const lockdownStrings = {
   customReset: (name: string) => `Reset to ${name}`,
   customShow: "Show changes",
   changed: "Changed",
+  changedCount: (count: number) => `${count} changed`,
 
   // ---- Program blocking (one control for the three program checks)
   modeTitle: "Program blocking",
@@ -258,9 +261,11 @@ export const lockdownStrings = {
   save: "Save",
   discard: "Undo changes",
   unsaved: (count: number) => n(count, "unsaved change", "unsaved changes"),
+  saveBarLabel: "Unsaved changes",
+  changesInfoLabel: "What changed",
   changesInfoMore: (count: number) => `and ${count} more`,
   saved: "Saved. Your PCs get this within a minute.",
-  savedRings: "Saved. Pilot PCs get this within a minute; the others when the rollout moves on.",
+  savedRings: "Saved. Your first PCs get this within a minute.",
   enforceTitle: "Start blocking programs?",
   enforceIntro: "From now on, programs that are not allowed do not start on this group's PCs.",
   enforceFindings: (count: number, more: boolean) =>
@@ -275,19 +280,6 @@ export const lockdownStrings = {
   // ---- errors
   managedEmpty: "Add a Wi-Fi network to this group first.",
   badLockout: "Check the wrong-password numbers.",
-
-  // ---- Legacy keys of the old group screen (`Lockdown.tsx`); the composition step removes them with that screen.
-  findingsNew: (count: number, more: boolean) => `Programs to review: ${more ? `${OPEN_FINDINGS_CAP}+` : count}`,
-  findingsDetail: "Allow the programs your employees need before you block.",
-  findingsOpen: "Review programs",
-  auditLong: (days: number) => `Trial run for ${n(days, "day", "days")}.`,
-  auditLongDetail: "Nothing is blocked yet. Review the programs, then switch to Block.",
-  rulesTitle: "Program blocking",
-  rulesLead: "Three checks decide which programs may start. Start with a trial run, review the programs, then block.",
-  staffLead: `Windows tools hidden or turned off for employees. ${STAFF_ONLY}`,
-  machineLead: `Settings of the whole PC. ${EVERYONE}`,
-  usbLead: "Choose which kinds of USB devices may be used.",
-  perfLead: "Makes slow PCs feel faster.",
 };
 
 export const findingsStrings = {
@@ -330,7 +322,8 @@ export const findingsStrings = {
   appControlInfo: "Windows blocks this one for everyone because it can get around security rules. It cannot be allowed one by one.",
   howTitle: "How to review",
   howSteps: ["Allow what your employees need.", "Ignore the rest.", "Switch the group to Block."],
-  backToGroup: (group: string) => `Back to ${group}`,
+  backToLockdown: "Back to lockdown settings",
+  tabsLabel: "Programs by status",
 
   // ---- allow dialog
   allowTitle: (file: string) => `Allow ${file}`,
@@ -346,11 +339,6 @@ export const findingsStrings = {
     hash: "This exact version",
     path: "By folder",
   } satisfies Record<ExceptionKind, string>,
-  kindHelp: {
-    publisher: (signer: string) => `Any version signed by ${signer}. Keeps working after updates.`,
-    hash: "Only this exact version. After an update, allow it again.",
-    path: "Any file with this name in a folder only administrators can change.",
-  },
   kindUnavailable: {
     publisher: "Not signed",
     hash: "The PC did not send its fingerprint",
@@ -359,16 +347,18 @@ export const findingsStrings = {
   folder: "Folder",
   folderHint: "Start with {ProgramFiles}, {ProgramFilesX86} or {RuleboxApps}, for example {ProgramFiles}\\Acme.",
   folderProblem: "Enter a folder under {ProgramFiles}, {ProgramFilesX86} or {RuleboxApps}.",
+  advanced: "Advanced",
   groups: "Allow in",
+  groupsOne: (group: string) => `Allowed in ${group}`,
   groupsFilter: "Find a group",
   groupsHint: `Up to ${MAX_ALLOW_GROUPS} groups.`,
   groupsProblem: "Choose at least one group.",
   groupsTooMany: `Choose at most ${MAX_ALLOW_GROUPS} groups at a time.`,
   app: "Belongs to app",
   appNone: "No app",
-  appHint: "Optional. Helps you find it later.",
+  appSearch: "Find an app",
+  appEmpty: "No app found.",
   reason: "Note",
-  reasonHint: `Optional. Up to ${MAX_EXCEPTION_REASON} characters.`,
   reasonProblem: `Use at most ${MAX_EXCEPTION_REASON} characters.`,
   allowConfirm: "Allow",
   allowing: "Allowing…",
@@ -384,10 +374,6 @@ export const findingsStrings = {
   } as Record<string, string>,
   tooManyGroups: `Choose at most ${MAX_ALLOW_GROUPS} groups at a time.`,
   tooManyExceptions: "This group has 200 extra allowed programs already. Remove one first.",
-
-  // ---- Legacy keys of the old findings screen (`Findings.tsx`); the findings step removes them with that screen.
-  colSigner: "Publisher",
-  colLayer: "Check",
 };
 
 /** The sentence for the refusals of the lockdown functions that need their own words (null = the usual sentence). */
