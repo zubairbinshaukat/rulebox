@@ -64,6 +64,8 @@ export interface DemoFactors {
   pinLockKind: "backoff" | "lockout" | null;
   /** Unused recovery codes of the PIN (`XXXX-XXXX`). */
   recoveryCodes: string[];
+  /** Recovery codes were made at least once (the backend's `recoveryCreatedAt`): setup is not unfinished. */
+  recoveryMade?: boolean;
   passkeys: DemoPasskey[];
 }
 
@@ -93,6 +95,7 @@ function seedFactors(db: DemoDb): Map<string, DemoFactors> {
       pinLockedUntil: 0,
       pinLockKind: null,
       recoveryCodes: [...DEMO_RECOVERY_CODES],
+      recoveryMade: true,
       passkeys: [],
     });
   return map;

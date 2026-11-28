@@ -23,7 +23,7 @@ import {
 import { pinChangedMail, pinFailuresMail, pinLockedMail, pinResetDoneMail } from "./lib/mail";
 import { mailReadyFlag } from "./lib/platformSecrets";
 import { checkOrFail, consumeQuietly, consumeOrFail } from "./lib/rateLimits";
-import { matchRecoveryHash, newRecoveryCodes, recoveryHash, requirePepper } from "./lib/recoveryCodes";
+import { matchRecoveryHash, newRecoveryCodes, recoveryHash, recoveryPepper, requirePepper } from "./lib/recoveryCodes";
 import { deleteUserSessions } from "./lib/sessions";
 import {
   actionPinProblem,
@@ -162,6 +162,8 @@ export const status = memberQuery("viewer")({
       failedSinceUnlock: v.number(),
       attemptsBeforeLockout: v.number(),
       recoveryCodesLeft: v.number(),
+      /** The deployment can make recovery codes (the server pepper is set). False: setup can't finish; an operator must fix it. */
+      recoveryAvailable: v.boolean(),
       resetByEmail: v.boolean(),
     }),
   }),
@@ -209,6 +211,8 @@ export const status = memberQuery("viewer")({
         set: pinSet,
         ...view,
         recoveryCodesLeft: f?.recoveryHashes?.length ?? 0,
+        // An env read, no database cost: lets setup say so BEFORE the first PIN is saved.
+        recoveryAvailable: recoveryPepper() !== null,
         resetByEmail: await mailReadyFlag(ctx),
       },
     };
@@ -257,7 +261,10 @@ export const setActionPin = memberAction("viewer", { stepUp: "none" })({
     if (problem !== null) fail("invalid_argument", { field: "pin", detail: problem });
     const now = Date.now();
     // Check before spending Argon2 work; the store re-checks atomically.
-    await ctx.runQuery(internal.stepUp.authorizeChange, { ...who(ctx), now });
+    const mode = await ctx.runQuery(internal.stepUp.authorizeChange, { ...who(ctx), now });
+    // The first PIN is followed by recovery codes in setup: with no pepper they can't be made, so
+    // don't leave a person half set up (the dashboard says so up front; this is the server's guard).
+    if (mode === "bootstrap") requirePepper();
     const hash = await hashSecret(ctx, args.pin);
     await ctx.runMutation(internal.stepUp.storeActionPin, {
       ...who(ctx),

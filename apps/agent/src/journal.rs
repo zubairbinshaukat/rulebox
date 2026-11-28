@@ -947,6 +947,13 @@ fn change_unlogged(ctx: &JournalCtx<'_>, change: &Change) -> Result<ChangeOutcom
             true
         }
     };
+    // (Q-A7) The first value Rulebox puts in a policy key that does not exist yet makes the key: remember that, so the restore can
+    // remove the key again once it is empty. Only on the first record of an entry (a later write finds the key there).
+    if recorded_now {
+        if let (JournalTarget::MachineValue(key), Value::Reg(Some(_))) = (&change.target, &desired) {
+            record_created_keys(ctx, &key.path);
+        }
+    }
     crash_point!(AfterPending);
 
     let needs_write = !same_value(&current, &desired);
@@ -1026,6 +1033,69 @@ fn change_unlogged(ctx: &JournalCtx<'_>, change: &Change) -> Result<ChangeOutcom
     } else {
         ChangeOutcome::Unchanged
     })
+}
+
+/// (Q-A7) Notes the keys on the way to `path` that do not exist yet and that Rulebox may later remove
+/// (`machinereg::check_created_key`: at or below a root the agent writes; never an ancestor of one). Best effort: a key whose
+/// existence cannot be read is not recorded, and a failed save only means the key stays after the restore.
+fn record_created_keys(ctx: &JournalCtx<'_>, path: &str) {
+    let mut missing: Vec<String> = Vec::new();
+    let mut current = path.trim_matches('\\').to_string();
+    while rulebox_win32::machinereg::check_created_key(&current).is_ok() {
+        match ctx.platform.machine_key_exists(&current) {
+            Ok(false) => missing.push(current.clone()),
+            // It exists (not ours) or cannot be told: this key and its parents are left alone.
+            Ok(true) | Err(_) => break,
+        }
+        match current.rsplit_once('\\') {
+            Some((parent, _)) => current = parent.to_string(),
+            None => break,
+        }
+    }
+    if missing.is_empty() {
+        return;
+    }
+    let saved = persist(ctx, |state| {
+        for key in missing {
+            if !state.created_machine_keys.iter().any(|known| known.eq_ignore_ascii_case(&key)) {
+                state.created_machine_keys.push(key);
+            }
+        }
+    });
+    if let Err(error) = saved {
+        tracing::warn!("cannot record the policy keys Rulebox created: {error}");
+    }
+}
+
+/// (Q-A7, owner 2026-11-28) After the entries of `restored` (HKLM key paths of values that went back) were restored: removes the
+/// keys Rulebox **recorded creating** that are one of those paths or an ancestor of one, deepest first, but only while they are
+/// empty (`delete_machine_key_if_empty`). A key that still holds a value or a subkey (another journal entry, an administrator's own
+/// value) stays and stays recorded, to be tried at the next restore below it. A key that existed before Rulebox was never recorded and
+/// is never touched. Best effort: nothing here fails a restore.
+pub fn prune_created_keys(ctx: &JournalCtx<'_>, restored: &[String]) {
+    let norm = |text: &str| text.trim_matches('\\').to_ascii_lowercase();
+    let restored: Vec<String> = restored.iter().map(|path| norm(path)).collect();
+    let mut keys: Vec<String> = ctx.shared.read(|state| {
+        state
+            .created_machine_keys
+            .iter()
+            .filter(|key| {
+                let key = norm(key);
+                restored.iter().any(|path| *path == key || path.starts_with(&format!("{key}\\")))
+            })
+            .cloned()
+            .collect()
+    });
+    keys.sort_by_key(|key| std::cmp::Reverse(key.matches('\\').count()));
+    for key in keys {
+        match ctx.platform.delete_machine_key_if_empty(&key) {
+            Ok(true) => {
+                let _ = persist(ctx, |state| state.created_machine_keys.retain(|known| !known.eq_ignore_ascii_case(&key)));
+            }
+            Ok(false) => {}
+            Err(error) => tracing::warn!("cannot remove the empty policy key Rulebox created: {error}"),
+        }
+    }
 }
 
 /// The id of the Staff account the state records, if there is one.
@@ -1218,6 +1288,41 @@ pub fn restore_entry(ctx: &JournalCtx<'_>, id: &str) -> Result<(), JournalError>
     }
 }
 
+/// What [`forget_check`] found for one journal entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForgetCheck {
+    /// No entry has this id.
+    NotFound,
+    /// The live value is not the recorded original: the entry still has something to restore and is not forgotten.
+    Differs,
+    /// The live value already equals the recorded original: the entry has nothing left to do.
+    Matches,
+}
+
+/// (Q-A8, owner 2026-11-28) Read-only: does the entry `id` have nothing left to restore, because what is on the PC now equals
+/// the original it recorded? An entry of a kind this build does not know, or one whose live value cannot be read here (an
+/// error), is never "matches".
+pub fn forget_check(ctx: &JournalCtx<'_>, id: &str) -> Result<ForgetCheck, JournalError> {
+    let Some(entry) = find_entry(ctx, id) else {
+        return Ok(ForgetCheck::NotFound);
+    };
+    if matches!(entry.target, JournalTarget::Unknown(_)) {
+        return Err(JournalError::UnknownTarget);
+    }
+    let current = read_current(ctx, &entry.target)?;
+    Ok(if original_matches(ctx, &current, &entry.original) { ForgetCheck::Matches } else { ForgetCheck::Differs })
+}
+
+/// (Q-A8) Removes the entry `id` from the journal, only when [`forget_check`] says its live value already equals the original.
+/// Writes nothing to the machine, only the agent state. Returns what the check found (`Matches` = it was removed).
+pub fn forget_entry(ctx: &JournalCtx<'_>, id: &str) -> Result<ForgetCheck, JournalError> {
+    let found = forget_check(ctx, id)?;
+    if found == ForgetCheck::Matches {
+        persist(ctx, |state| state.journal.retain(|entry| entry.id != id))?;
+    }
+    Ok(found)
+}
+
 /// Restores the whole journal, last written first.
 pub fn restore_all(ctx: &JournalCtx<'_>) -> RestoreReport {
     restore_matching(ctx, |_| true)
@@ -1311,7 +1416,16 @@ fn restore_one(ctx: &JournalCtx<'_>, entry: &JournalEntry) -> Result<(), Journal
         }
     }
     match write_original(ctx, entry) {
-        Ok(()) => persist(ctx, |state| state.journal.retain(|e| e.id != entry.id)),
+        Ok(()) => {
+            let removed = persist(ctx, |state| state.journal.retain(|e| e.id != entry.id));
+            // (Q-A7) The value is back: a policy key Rulebox created, now empty, goes too.
+            if removed.is_ok() {
+                if let Some(key) = entry.machine_key() {
+                    prune_created_keys(ctx, std::slice::from_ref(&key.path));
+                }
+            }
+            removed
+        }
         Err(error) => {
             let code = error_code(&error).to_string();
             let _ = persist(ctx, |state| {

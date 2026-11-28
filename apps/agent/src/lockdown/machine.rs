@@ -231,18 +231,20 @@ fn l2_entries_under(ctx: &ApplyCtx<'_>, root: &str) -> Vec<JournalEntry> {
 
 // ---------------------------------------------------------------- admin tiles
 
+/// The note a layer reports when `hideAdminTiles` is on but E-71 is not recorded (not a failure).
+pub const ADMIN_TILES_SKIPPED: &str = "admin_tiles_skipped";
+
 /// `hideAdminTiles` (Q5): `UserList\<account name> = 0` for each enabled local
-/// administrator. Held back unless the E-71 flag is set (I7 refuses the document first;
-/// this is the same check for a caller that skipped `validate`). A list that cannot be
-/// read changes nothing.
+/// administrator. Held back unless the E-71 flag is set (I7, owner decision 2026-11-28): only
+/// this option is skipped, the rest of the document applies, and the layer reports the note
+/// [`ADMIN_TILES_SKIPPED`]. Tiles written earlier (the flag was set before) are put back, as for
+/// an option that is off. A list that cannot be read changes nothing.
 fn admin_tiles(ctx: &ApplyCtx<'_>, policy: Option<&LockdownPolicy>, tally: &mut Tally, restore: &mut Vec<String>) {
     let wanted = policy.is_some_and(|p| p.machine.hide_admin_tiles);
     let mut keep: HashSet<String> = HashSet::new();
-    if wanted {
-        if !ctx.facts.admin_signin_verified {
-            tally.record(Err("admin_signin_unverified"));
-            return;
-        }
+    if wanted && !ctx.facts.admin_signin_verified {
+        tally.note.get_or_insert(ADMIN_TILES_SKIPPED);
+    } else if wanted {
         let admins = match ctx.journal.platform.enabled_local_admin_accounts() {
             Ok(admins) => admins,
             Err(_) => {

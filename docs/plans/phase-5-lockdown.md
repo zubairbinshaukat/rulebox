@@ -423,7 +423,7 @@ the non-secret views named in 4.12.
                "settings": true, "signOut": true, "changePassword": true, "hideDrives": true,
                "accessibilityHotkeys": true, "officeMacros": true },        // true = restricted (4.7)
     "machine": { "hideSwitchUser": true, "hideSignInPower": true, "denyElevationRequests": true,
-                 "hideAdminTiles": true, "noWakePassword": true, "restrictPrinterDrivers": true,
+                 "hideAdminTiles": false, "noWakePassword": true, "restrictPrinterDrivers": true,
                  "fileOutputPrinters": true,
                  "accountLockout": { "threshold": 10, "durationMin": 15, "windowMin": 15 } },  // null = leave (4.8)
     "appLocker":  { "mode": "audit" },                                  // off | audit | enforce
@@ -665,7 +665,7 @@ test on **generated output** (not on intentions) and a VM row.
 | I4 | Shift at startup works | `FORBIDDEN_WINLOGON_VALUES` checked by `machinereg`; no layer writes Winlogon values other than Phase 2's | `would_block_exit` | allowed-roots test; E-72 |
 | I5 | "Disable kiosk" from the dashboard reaches the device | The agent's network path is never blocked by a layer; `wifiManagedOnly` refused with no managed network or when it would disconnect the current link | `managed_networks_empty`, `would_disconnect` | unit; E-73 |
 | I6 | `rulebox-agent recover` run by an administrator works | AppLocker allow-all for Administrators; App Control levels allow Windows and the Rulebox folder; L1 is Staff-only, so the admin's own tools are untouched | `would_block_admin` | golden-file test; E-74 |
-| I7 | An administrator can still sign in | `hideAdminTiles` only after E-71 is recorded as passed (agent-config flag set by the user after the VM run); account lockout threshold ≥ 5 | `admin_signin_unverified`, `lockout_threshold_too_low` | unit; E-71 |
+| I7 | An administrator can still sign in | `hideAdminTiles` takes effect only after E-71 is recorded as passed (agent-config flag set by the user after the VM run). **Changed 2026-11-28 (owner):** without the flag the machine layer skips only that option, applies the rest of the document and reports the layer note `admin_tiles_skipped` (no refusal; `admin_signin_unverified` is no longer produced, the code stays for old reports). Account lockout threshold ≥ 5 is still a refusal | `lockout_threshold_too_low` (refusal), `admin_tiles_skipped` (layer note) | unit; E-71 |
 | I8 | Restore is always possible | Every write goes through the journal; unknown journal targets stop the apply | `journal_unknown_target` | journal tests |
 | I9 | Nothing is enforced without a prior audit period on this device | A layer switched to `enforce` that has never run in `audit` on this device runs 24 h in `audit` first and reports layer state `auditFirst` (the dashboard explains); the admin can skip this per device | `audit_first` (informational, not a refusal) | unit |
 | I10 | Keyboards, mice, touchpads, touch screens, pens, HID barcode scanners, USB hubs and root hubs, composite parents, Bluetooth input and the device's built-in devices are never blocked or removed (added 2026-11-08) | Deny tables (`USB_CLASSES`) are generated from a fixed const and compared with the `NEVER_BLOCK` const on every apply; there is no switch, no exception kind and no retroactive removal that can name those classes; a document or generated list that intersects them is refused (4.7a) | `would_block_input_device` | generated-output test over every USB switch × retroactive; E-67 (must pass) |
@@ -795,7 +795,7 @@ so next to each switch.
 | `hideSwitchUser` | `Policies\System\HideFastUserSwitching = 1` | No Switch user (Phase 2 edge 19) | E-01..E-09 |
 | `hideSignInPower` | `Policies\System\ShutdownWithoutLogon = 0` | No power button on the sign-in screen | E-60..E-69 |
 | `denyElevationRequests` | `Policies\System\ConsentPromptBehaviorUser = 0` | Standard users' elevation requests are denied without a credential prompt | E-30..E-39 |
-| `hideAdminTiles` | `SpecialAccounts\UserList\<name> = 0` for each enabled local administrator (Q5; gated by I7) | Admin tiles hidden; admins use "Other user" | E-01..E-09 |
+| `hideAdminTiles` | `SpecialAccounts\UserList\<name> = 0` for each enabled local administrator (Q5; gated by I7: skipped with a warning until E-71; off by default since 2026-11-28) | Admin tiles hidden; admins use "Other user" | E-01..E-09 |
 | `accountLockout` | `NetUserModalsSet` level 3: threshold / duration / window | Repeated wrong passwords lock the account (PRD 13.6 #8) | E-01..E-09 |
 | `noWakePassword` | `PowerSettings\0e796bdb-100d-47d6-a2d5-f7d2daa51f51\{ACSettingIndex,DCSettingIndex} = 0` | No password on wake while the kiosk is on | E-01..E-09 |
 | `restrictPrinterDrivers` | `Printers\PointAndPrint\RestrictDriverInstallationToAdministrators = 1` | Only administrators install printer drivers | E-20..E-29 |
@@ -1599,7 +1599,8 @@ from a scratch copy (show the failing output, then restore).
 4. Tests: each item on/off/on again is idempotent; restore returns the
    exact original (absent, DWORD, string); hive not loaded → mounted
    (SimPlatform); every refusal code reachable; a document that sets
-   `hideAdminTiles` without the E-71 flag is refused. **I10 test:** for
+   `hideAdminTiles` without the E-71 flag skips only that option and reports
+   `admin_tiles_skipped` (changed 2026-11-28; it used to be a refusal). **I10 test:** for
    every combination of the five USB switches and `retroactive`, the
    generated deny classes never contain HID, keyboard, mouse, USB hub / root
    hub, Bluetooth, system or built-in-device classes, and a document or a
@@ -2676,7 +2677,7 @@ by Rulebox (Sections 4 and 5); the checks are run by the tester in the VM
 | 39 | "No printing" requested while printers are assigned | Spooler stays on; `performance.noPrinting` ignored with a dashboard note | 14, 18 |
 | 40 | A policy hides Switch user but a second employee session is already disconnected | Phase 2 rule: the agent logs off disconnected Staff sessions; Hide Switch user prevents new ones | 5 |
 | 41 | Account lockout locks the organization's admin account | Threshold ≥ 5 enforced (validator); the built-in Administrator (RID 500) stays exempt by Windows default; dashboard explains; `recover` path documented | 4, 5 |
-| 42 | Admin tiles hidden and "Other user" does not appear on the sign-in screen | Validator refuses `hideAdminTiles` until the VM confirms "Other user" (E-71); fallback per Q5 | 5, 22 |
+| 42 | Admin tiles hidden and "Other user" does not appear on the sign-in screen | The agent skips `hideAdminTiles` (only that option, not the whole section) until the VM confirms "Other user" (E-71) and reports `admin_tiles_skipped`; the option is off by default for new groups (2026-11-28); fallback per Q5 | 5, 22 |
 | 43 | App Control activation needs a restart (Windows 10, or removal on some builds) | Layer state `restartPending`; the agent never restarts the PC; the dashboard shows "Restart needed" | 6 |
 | 44 | ETW session cannot start (64-session limit, permission) | Procwatch falls back to a 2-second process snapshot diff; `procWatch.detail = "snapshot_fallback"`; still terminates in `enforce` | 8 |
 | 45 | ETW events lost under a start burst | Lost-event counter read each minute; when > 0 a snapshot diff runs once to catch missed Staff processes | 8 |
@@ -2842,7 +2843,7 @@ the rows inside a range are free.
 | Recommended block rules list changes | Microsoft updates the list | The XML in the repo is versioned and updated deliberately; the policy version number increases with each update |
 | ETW real-time sessions | 64 sessions system-wide; buffers can lose events under load | Snapshot fallback and lost-event catch-up (edge cases 44, 45) |
 | BCD change with BitLocker | Some BCD changes trigger BitLocker recovery **(unverified for `recoveryenabled`)** | `leave` when BitLocker protects the OS volume |
-| Hidden admin tiles and "Other user" | Whether Windows 11 shows "Other user" when admin tiles are hidden is **(unverified)** | Validator refuses until VM row E-71 passes (edge case 42) |
+| Hidden admin tiles and "Other user" | Whether Windows 11 shows "Other user" when admin tiles are hidden is **(unverified)** | The agent skips that one option until VM row E-71 passes (edge case 42; changed 2026-11-28, it used to refuse the whole document) |
 | Print spooler security | Point and Print driver downloads were a source of serious vulnerabilities | Drivers only from the local store; `RestrictDriverInstallationToAdministrators = 1` |
 | WebView2 print and file pickers | Not interceptable inside WebView2 (Phase 3) | Closed one level down (L1, L3–L5, file-output printers denied) |
 | Free-plan database I/O | ≈ 1 GB/month shared by all tenants | Section 4.19; post-Phase-5 I/O pass |

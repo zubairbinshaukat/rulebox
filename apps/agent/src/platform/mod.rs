@@ -59,6 +59,8 @@ pub const MUTATING_METHODS: &[&str] = &[
     "delete_staff_value",
     // Phase 6 Step 17.
     "delete_staff_key_if_empty",
+    // Q-A7.
+    "delete_machine_key_if_empty",
     "deploy_ci_policy",
     "remove_ci_policy",
     "set_applocker_policy",
@@ -379,6 +381,8 @@ pub trait Platform: Send + Sync + 'static {
     /// The names of the values directly under an HKLM key (empty when the key is absent).
     /// Lets the device-class rules pick free names in the deny list and check it (4.7a).
     fn list_machine_value_names(&self, path: &str) -> Result<Vec<String>, PlatformError>;
+    /// (Q-A7) Whether the HKLM key exists. The journal asks before it writes a value, to record the keys Rulebox creates.
+    fn machine_key_exists(&self, path: &str) -> Result<bool, PlatformError>;
     /// A value in the Staff hive (`path` relative to the hive, under
     /// `staffreg::ALLOWED_ROOTS`). `Ok(None)`: absent, or the Staff account is gone. On a
     /// machine that is not a test machine a signed-out Staff hive cannot be read (mounting
@@ -574,6 +578,9 @@ pub trait Platform: Send + Sync + 'static {
     /// (Phase 6 Step 17) Deletes a browser policy key (`staffreg::BROWSER_ROOTS` or a key below one) of the
     /// Staff hive when it holds no value and no subkey. `Ok(false)`: it still holds something.
     fn delete_staff_key_if_empty(&self, sid: &str, path: &str) -> Result<bool, PlatformError>;
+    /// (Q-A7) Deletes an HKLM policy key that Rulebox created (`machinereg::check_created_key`: at or below a root the agent
+    /// writes) when it holds no value and no subkey. `Ok(false)`: it still holds something.
+    fn delete_machine_key_if_empty(&self, path: &str) -> Result<bool, PlatformError>;
     /// Copies a binary App Control policy into the active folder as `{policy_id}.cip`.
     fn deploy_ci_policy(&self, policy_id: &str, binary: &[u8]) -> Result<(), PlatformError>;
     fn remove_ci_policy(&self, policy_id: &str) -> Result<(), PlatformError>;

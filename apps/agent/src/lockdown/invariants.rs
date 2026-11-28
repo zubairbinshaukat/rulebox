@@ -31,7 +31,9 @@ pub enum Refusal {
     WouldDisconnect,
     /// I6: an administrator (or `rulebox-agent recover`) would be blocked.
     WouldBlockAdmin,
-    /// I7: `hideAdminTiles` before E-71 (an administrator can still sign in) passed.
+    /// I7: `hideAdminTiles` before E-71 (an administrator can still sign in) passed. **No longer produced** since
+    /// 2026-11-28 (the layer skips only that option and reports `admin_tiles_skipped`); the code stays so reports
+    /// from older agents still decode and the dashboard keeps its sentence.
     AdminSigninUnverified,
     /// I7: an account lockout threshold under 5.
     LockoutThresholdTooLow,
@@ -200,14 +202,13 @@ fn check_network(doc: &AgentDoc, facts: &Facts) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// I7.
-fn check_admin_signin(doc: &AgentDoc, facts: &Facts) -> Result<(), Refusal> {
+/// I7 (the lockout threshold; `hideAdminTiles` without E-71 is the machine layer's warning, not a refusal).
+fn check_lockout(doc: &AgentDoc) -> Result<(), Refusal> {
     let Some(lockdown) = &doc.lockdown else {
         return Ok(());
     };
-    if lockdown.machine.hide_admin_tiles && !facts.admin_signin_verified {
-        return Err(Refusal::AdminSigninUnverified);
-    }
+    // `hideAdminTiles` without E-71 is no longer a refusal (owner decision 2026-11-28): the machine layer skips
+    // that one option and reports `admin_tiles_skipped` (`machine::admin_tiles`); the rest of the document applies.
     if lockdown.machine.account_lockout.is_some_and(|lockout| lockout.threshold < MIN_LOCKOUT_THRESHOLD) {
         return Err(Refusal::LockoutThresholdTooLow);
     }
@@ -275,7 +276,7 @@ pub fn validate(doc: &AgentDoc, facts: &Facts) -> Result<(), Refusal> {
     if facts.generated.blocks_administrators {
         return Err(Refusal::WouldBlockAdmin);
     }
-    check_admin_signin(doc, facts)?;
+    check_lockout(doc)?;
     check_input_devices(doc, facts)
 }
 

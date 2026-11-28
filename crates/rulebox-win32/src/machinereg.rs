@@ -13,7 +13,7 @@
 use crate::autologon::{check_winlogon_value, FORBIDDEN_WINLOGON_VALUES, WINLOGON_KEY};
 use crate::error::{Result, Win32Error};
 use crate::guard::require_armed_machine;
-use crate::registry::{delete_hklm_key, get_hklm, list_hklm_value_names, set_hklm, RegValue};
+use crate::registry::{delete_hklm_key, delete_hklm_key_if_empty, get_hklm, hklm_key_exists, list_hklm_value_names, set_hklm, RegValue};
 
 /// The Safe Mode registration key name (plan 4.16). Under the two `SafeBoot` roots only
 /// this one subkey is writable.
@@ -125,6 +125,39 @@ pub fn set_machine_value(path: &str, name: &str, value: Option<&RegValue>) -> Re
     set_hklm(path.trim_matches('\\'), name, value)
 }
 
+/// (Q-A7) The keys Rulebox may record as "created by me" and later delete when they are empty: a key at or below one of the
+/// subtree roots of [`ALLOWED_ROOTS`] (not Winlogon itself, not the Safe Mode roots), whole segments, no `..`. Never an ancestor
+/// of a root (`...\Windows`, `...\Power`). No API call, no guard.
+pub fn check_created_key(path: &str) -> Result<()> {
+    let path = path.trim_matches('\\');
+    if plain_path(path)
+        && !SAFE_BOOT_ROOTS.iter().any(|root| under(path, root))
+        // The MSI's own key: never Rulebox's to remove.
+        && !under(path, crate::installmarker::PENDING_KEY)
+        && ALLOWED_ROOTS.iter().filter(|root| is_subtree_root(root)).any(|root| under(path, root))
+    {
+        Ok(())
+    } else {
+        Err(forbidden(path))
+    }
+}
+
+/// (Q-A7) Whether `HKLM\<path>` exists (64-bit view). Read-only, any key.
+pub fn key_exists(path: &str) -> Result<bool> {
+    hklm_key_exists(path.trim_matches('\\'))
+}
+
+/// (Q-A7) Deletes `HKLM\<path>` only when it holds no value and no subkey, and only for a key [`check_created_key`] accepts.
+/// `Ok(false)`: it still holds something (an administrator's own value, another Rulebox value); nothing changed. A key that is
+/// not there is `Ok(true)`.
+///
+/// DESTRUCTIVE: guarded.
+pub fn delete_key_if_empty(path: &str) -> Result<bool> {
+    check_created_key(path)?;
+    require_armed_machine()?;
+    delete_hklm_key_if_empty(path.trim_matches('\\'))
+}
+
 /// The key of the agent's Safe Mode registration for `mode` (`Minimal` or `Network`):
 /// `SYSTEM\CurrentControlSet\Control\SafeBoot\<mode>\RuleboxAgent`. No API call, no guard.
 pub fn check_safe_boot_mode(mode: &str) -> Result<String> {
@@ -149,6 +182,39 @@ pub fn delete_safe_boot_entry(mode: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_keys_at_or_below_a_written_root_may_be_recorded_as_created_and_removed() {
+        for key in [
+            r"SOFTWARE\Policies\Microsoft\Windows\OOBE",
+            r"SOFTWARE\Policies\Microsoft\Power\PowerSettings",
+            r"SOFTWARE\Policies\Microsoft\Power\PowerSettings\0e796bdb-100d-47d6-a2d5-f7d2daa51f51",
+            r"SOFTWARE\Policies\Microsoft\Windows NT\Printers",
+            r"SOFTWARE\Policies\Microsoft\Windows NT\Printers\PointAndPrint",
+            r"software\policies\microsoft\windows\oobe",
+            r"SOFTWARE\Policies\Microsoft\Windows\OOBE\",
+        ] {
+            assert!(check_created_key(key).is_ok(), "{key}");
+        }
+        for key in [
+            // Ancestors of a root, and the keys the agent only writes values in or that are not ours.
+            r"SOFTWARE\Policies\Microsoft\Windows",
+            r"SOFTWARE\Policies\Microsoft\Power",
+            r"SOFTWARE\Policies\Microsoft\Windows NT",
+            r"SOFTWARE\Policies",
+            WINLOGON_KEY,
+            r"SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal",
+            r"SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\RuleboxAgent",
+            r"SOFTWARE\Rulebox\Install\Pending",
+            r"SOFTWARE\Policies\Microsoft\Windows\OOBEX",
+            r"SOFTWARE\Policies\Microsoft\Windows\OOBE\..\Windows",
+            "",
+        ] {
+            assert!(check_created_key(key).is_err(), "{key}");
+        }
+        // The rule comes before the guard and before any API call.
+        assert!(matches!(delete_key_if_empty(r"SOFTWARE\Policies\Microsoft\Windows"), Err(Win32Error::Forbidden(_))));
+    }
 
     #[test]
     fn every_root_accepts_a_value_below_it() {

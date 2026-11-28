@@ -243,6 +243,44 @@ pub fn delete_hklm_key(path: &str) -> Result<()> {
     Err(status_err("RegDeleteKeyExW", status))
 }
 
+/// (Q-A7) Whether the key `HKLM\<path>` exists (64-bit view). Read-only.
+pub fn hklm_key_exists(path: &str) -> Result<bool> {
+    Ok(open_key(HKEY_LOCAL_MACHINE, path, KEY_QUERY_VALUE | KEY_WOW64_64KEY)?.is_some())
+}
+
+/// (Q-A7) Deletes the key `HKLM\<path>` (64-bit view) only when it has no values and no subkeys.
+/// `Ok(false)`: it holds something (nothing was changed); `Ok(true)`: it was deleted or was not
+/// there. Callers restrict which keys reach this (`machinereg::delete_key_if_empty`).
+///
+/// DESTRUCTIVE: guarded.
+pub fn delete_hklm_key_if_empty(path: &str) -> Result<bool> {
+    require_armed_machine()?;
+    let Some(key) = open_key(HKEY_LOCAL_MACHINE, path, KEY_QUERY_VALUE | KEY_WOW64_64KEY)? else {
+        return Ok(true);
+    };
+    let (mut subkeys, mut values) = (0u32, 0u32);
+    // SAFETY: the key is open with KEY_QUERY_VALUE; only the two count out pointers are passed,
+    // every other optional argument is null.
+    let status = unsafe {
+        RegQueryInfoKeyW(key.0, None, None, None, Some(&mut subkeys), None, None, Some(&mut values), None, None, None, None)
+    };
+    if status != ERROR_SUCCESS {
+        return Err(status_err("RegQueryInfoKeyW", status));
+    }
+    if subkeys != 0 || values != 0 {
+        return Ok(false);
+    }
+    drop(key);
+    let wide = to_wide(path);
+    // SAFETY: `wide` is NUL-terminated and outlives the call; the 64-bit view flag is the documented
+    // `samDesired` value for `RegDeleteKeyExW`; the key has no subkeys (RegDeleteKeyEx fails otherwise).
+    let status = unsafe { RegDeleteKeyExW(HKEY_LOCAL_MACHINE, PCWSTR(wide.as_ptr()), KEY_WOW64_64KEY.0, None) };
+    if status == ERROR_FILE_NOT_FOUND || status == ERROR_SUCCESS {
+        return Ok(true);
+    }
+    Err(status_err("RegDeleteKeyExW", status))
+}
+
 /// (Phase 5 Step 7) Deletes the key `HKLM\<path>` (64-bit view) with everything below it. A
 /// key that does not exist succeeds. Callers restrict which keys reach this
 /// (`applocker::clear_policy`: the AppLocker collection keys only).

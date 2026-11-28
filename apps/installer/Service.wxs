@@ -77,7 +77,8 @@
     drops its device credentials and takes the RuleboxStaff account with it. The agent's unenroll command with its
     remove-staff-account option (apps\agent\src\enroll.rs) tells the backend, switches the kiosk off if it is still on, signs
     the Staff session out and deletes the account and its profile, and wipes the saved device secrets (secrets.bin) and
-    the organization's data. Logs and the rest of ProgramData\Rulebox stay (the owner kept "logs stay").
+    the organization's data. Logs stay (the owner kept "logs stay"); the rest of ProgramData\Rulebox goes in the second
+    uninstall-only action below (PurgeDataAtUninstall, Q-A6).
 
     - It talks to the RUNNING service over the admin pipe (SYSTEM is allowed), so it runs Before="StopServices" and
       before RemoveFiles: the service and the exe are both still there. It is an EXE custom action run from the
@@ -98,8 +99,29 @@
         Impersonate="no"
         Return="ignore" />
 
+    <!--
+    Uninstall only (Phase 6 Step 22 run A3, Q-A6, owner-approved 2026-11-28): what the unenroll leaves in ProgramData\Rulebox goes
+    too, except logs\ (state\ with secrets.bin and the journal, downloads\, selfupdate\, installer-temp\, icons\, drivers\).
+    The installed agent's `purge-data` command does it (apps\agent\src\purge.rs).
+
+    - It must not run while the service writes there, so it runs After="StopServices" (the unenroll action runs before that
+      point, over the admin pipe). The exe and the install marker (the agent's machine guard) are both still there then:
+      RemoveFiles and the registry removals come later.
+    - The same condition as the unenroll action: a real uninstall only. A MAJOR UPGRADE removes the old product too
+      (UPGRADINGPRODUCTCODE is set), and the enrolled PC must keep its state, secrets and downloads then.
+    - Return="ignore": a file that is still open is reported by the command and left; the uninstall goes on.
+    -->
+    <CustomAction
+        Id="PurgeDataAtUninstall"
+        FileRef="RuleboxAgentExe"
+        ExeCommand="purge-data"
+        Execute="deferred"
+        Impersonate="no"
+        Return="ignore" />
+
     <InstallExecuteSequence>
       <Custom Action="UnenrollAtUninstall" Before="StopServices" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="PurgeDataAtUninstall" After="StopServices" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
   </Fragment>
 </Wix>

@@ -97,6 +97,21 @@ describe("deviceApi:reportApply", () => {
     expect(r!.state).toBe("partial");
   });
 
+  // Owner decision 2026-11-28 (guard I7): a PC without E-71 skips only `hideAdminTiles` and says so as a layer note, not a refusal.
+  test("the admin_tiles_skipped warning of the machine layer survives the cleaning and the report stays `applied`", async () => {
+    const d = await setup();
+    await d.t.mutation(api.deviceApi.reportApply, {
+      ...d.creds,
+      ...APPLY_REPORT,
+      state: "applied",
+      layers: { ...APPLY_REPORT.layers, machine: { mode: "on", state: "ok", detail: "admin_tiles_skipped" } },
+    });
+    const [r] = await rows(d.t, "deviceApplyReports");
+    expect(r!.layers.machine).toEqual({ mode: "on", state: "ok", detail: "admin_tiles_skipped" });
+    expect(r!.state).toBe("applied");
+    expect(r!.refusal).toBeUndefined();
+  });
+
   test("a group of another organization named in `config` is dropped; too many item states and a bad hash are refused", async () => {
     const d = await setup();
     const other = await setup(d.t);

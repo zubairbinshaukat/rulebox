@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { setupAuth } from "../tests/convex/auth";
 import { asMember, expectCode, expectNoSecrets, type Member, type T } from "../tests/convex/identity";
 import { FLAG_UP, SoftAuthenticator } from "../tests/convex/webauthn";
@@ -13,8 +13,14 @@ import { parseWebAuthnConfig } from "./lib/webauthnConfig";
 
 declare const process: { env: Record<string, string | undefined> };
 
+// The first PIN needs the recovery-code secret (setup would otherwise stop after step 1).
+beforeEach(() => {
+  process.env.RULEBOX_RECOVERY_PEPPER = "passkeys-test-recovery-pepper-0123456789abc";
+});
+
 afterEach(() => {
   vi.useRealTimers();
+  delete process.env.RULEBOX_RECOVERY_PEPPER;
 });
 
 /**

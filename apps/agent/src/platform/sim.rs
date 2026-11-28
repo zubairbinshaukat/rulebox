@@ -68,6 +68,8 @@ pub enum SimOp {
     AppDataRedirected,
     // Phase 5 Step 3 (plan 4.5). Reads first, then the mutating ones.
     ListMachineValueNames,
+    /// (Q-A7) Read-only.
+    MachineKeyExists,
     ReadStaffValue,
     // Phase 5 Step 18 (read-only).
     ListStaffValueNames,
@@ -91,6 +93,8 @@ pub enum SimOp {
     DeleteStaffValue,
     /// (Phase 6 Step 17) Removing an emptied browser policy key.
     DeleteStaffKeyIfEmpty,
+    /// (Q-A7) Removing an emptied HKLM policy key Rulebox created.
+    DeleteMachineKeyIfEmpty,
     DeployCiPolicy,
     RemoveCiPolicy,
     RefreshCiPolicies,
@@ -182,6 +186,7 @@ impl SimOp {
                 | SimOp::StaffProfileDir
                 | SimOp::AppDataRedirected
                 | SimOp::ListMachineValueNames
+                | SimOp::MachineKeyExists
                 | SimOp::ReadStaffValue
                 | SimOp::ListStaffValueNames
                 | SimOp::ListCiPolicies
@@ -340,6 +345,9 @@ pub struct SimWorld {
     pub staff_values: HashMap<(String, String, String), RegData>,
     /// (Phase 6 Step 17) The emptied browser policy keys `delete_staff_key_if_empty` removed (lowercase paths, in order).
     pub staff_keys_removed: Vec<String>,
+    /// (Q-A7) HKLM keys that exist without being a prefix of a value in `machine_values` (lowercase paths): a key a value was
+    /// written in and deleted from stays, as in the registry. A key that is a prefix of some value exists as well.
+    pub machine_keys: std::collections::BTreeSet<String>,
     /// Active App Control policies: id (lowercase GUID) to the binary.
     pub ci_policies: std::collections::BTreeMap<String, Vec<u8>>,
     /// (Step 6) How many times `refresh_ci_policies` ran.
@@ -463,6 +471,7 @@ impl SimWorld {
             reset_hang: None,
             staff_values: HashMap::new(),
             staff_keys_removed: Vec::new(),
+            machine_keys: std::collections::BTreeSet::new(),
             ci_policies: std::collections::BTreeMap::new(),
             ci_refreshes: 0,
             applocker: AppLockerState::default(),
@@ -884,6 +893,15 @@ impl Platform for SimPlatform {
         }
         match data {
             Some(data) => {
+                // Writing a value creates the key and every missing parent (`RegCreateKeyEx`).
+                let mut path = key.path.trim_matches('\\').to_ascii_lowercase();
+                loop {
+                    world.machine_keys.insert(path.clone());
+                    match path.rsplit_once('\\') {
+                        Some((parent, _)) => path = parent.to_string(),
+                        None => break,
+                    }
+                }
                 world.machine_values.insert(key.clone(), data.clone());
             }
             None => {
@@ -1290,6 +1308,11 @@ impl Platform for SimPlatform {
             .collect())
     }
 
+    fn machine_key_exists(&self, path: &str) -> Result<bool, PlatformError> {
+        self.check(SimOp::MachineKeyExists)?;
+        Ok(sim_machine_key_exists(&lock(&self.world), path))
+    }
+
     fn read_staff_value(&self, sid: &str, path: &str, name: &str) -> Result<Option<RegData>, PlatformError> {
         self.check(SimOp::ReadStaffValue)?;
         staffreg::check_path(path).map_err(map_err)?;
@@ -1647,6 +1670,28 @@ impl Platform for SimPlatform {
             return Ok(false);
         }
         world.staff_keys_removed.push(key);
+        Ok(true)
+    }
+
+    /// (Q-A7) The same rule as `WindowsPlatform` (`machinereg::check_created_key`); "empty" = no value and no subkey at or below.
+    fn delete_machine_key_if_empty(&self, path: &str) -> Result<bool, PlatformError> {
+        self.check(SimOp::DeleteMachineKeyIfEmpty)?;
+        machinereg::check_created_key(path).map_err(map_err)?;
+        let mut world = lock(&self.world);
+        let key = path.trim_matches('\\').to_ascii_lowercase();
+        if !sim_machine_key_exists(&world, &key) {
+            return Ok(true);
+        }
+        let below = format!("{key}\\");
+        let holds_value = world.machine_values.keys().any(|k| {
+            let p = k.path.trim_matches('\\').to_ascii_lowercase();
+            p == key || p.starts_with(&below)
+        });
+        let holds_subkey = world.machine_keys.iter().any(|k| k.starts_with(&below));
+        if holds_value || holds_subkey {
+            return Ok(false);
+        }
+        world.machine_keys.remove(&key);
         Ok(true)
     }
 
@@ -2023,6 +2068,17 @@ impl Platform for SimPlatform {
 /// Registry names are case-insensitive: so are the simulated Staff-hive keys.
 // (Phase 5 Step 3) Nothing calls the new seam yet: the layers of Steps 4 to 20 do.
 #[allow(dead_code)]
+/// (Q-A7) A key exists when it was created (`machine_keys`) or some value sits at or below it.
+fn sim_machine_key_exists(world: &SimWorld, path: &str) -> bool {
+    let key = path.trim_matches('\\').to_ascii_lowercase();
+    let below = format!("{key}\\");
+    world.machine_keys.contains(&key)
+        || world.machine_values.keys().any(|k| {
+            let p = k.path.trim_matches('\\').to_ascii_lowercase();
+            p == key || p.starts_with(&below)
+        })
+}
+
 fn staff_key(sid: &str, path: &str, name: &str) -> (String, String, String) {
     (sid.to_string(), path.trim_matches('\\').to_ascii_lowercase(), name.to_ascii_lowercase())
 }

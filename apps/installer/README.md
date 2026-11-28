@@ -7,7 +7,7 @@ Design: `docs/plans/phase-6-installer-pilot.md` Section 4.10. Not Tauri's MSI ta
 | File | What it holds |
 |---|---|
 | `Package.wxs` | Product, upgrade code, major upgrade, install folder and its ACL, install marker, pending enrollment code, WebView2 bootstrapper, notices, licence |
-| `Service.wxs` | `rulebox-agent.exe`, the `RuleboxAgent` service and its restart settings, the "Rulebox Setup" shortcut, the uninstall-only `UnenrollAtUninstall` action |
+| `Service.wxs` | `rulebox-agent.exe`, the `RuleboxAgent` service and its restart settings, the "Rulebox Setup" shortcut, the uninstall-only `UnenrollAtUninstall` and `PurgeDataAtUninstall` actions |
 | `StaffApp.wxs` | `rulebox-shell.exe`, `current.json`, `versions\<version>\rulebox-staff.exe`, the `versions` folder cleanup (`RemoveFolderEx`) |
 | `Checks.wxs` | Launch conditions (administrator, x64, build 19045) and the uninstall guard (no free-space condition: see the file) |
 | `UI.wxs` | WixUI_Minimal, the logo bitmaps (`assets/brand/installer/`, from `pnpm gen:brand`) and the finish-page "Start Rulebox Setup" checkbox (the only custom action that runs at install) |
@@ -56,14 +56,24 @@ The build also checks that `rulebox-agent.exe --version` is `-Version` (build th
 
 - **Uninstall unenrolls.** `UnenrollAtUninstall` runs the installed `rulebox-agent.exe unenroll --remove-staff-account`
   (deferred, SYSTEM, before the service is stopped) only when `REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE`. It tells the
-  backend, deletes the RuleboxStaff account and profile, and wipes the device secrets and the organization's data. Logs
-  stay in `ProgramData\Rulebox`. Errors are ignored (not enrolled, offline, service stopped): the uninstall goes on and the
-  account stays. A major upgrade never runs it, although MajorUpgrade removes the old product on every upgrade.
+  backend, deletes the RuleboxStaff account and profile, and wipes the device secrets and the organization's data. Errors
+  are ignored (not enrolled, offline, service stopped): the uninstall goes on and the account stays. A major upgrade never
+  runs it, although MajorUpgrade removes the old product on every upgrade.
+- **Uninstall leaves only the logs (Q-A6, 2026-11-28).** `PurgeDataAtUninstall` runs the installed
+  `rulebox-agent.exe purge-data` (deferred, SYSTEM, **after** `StopServices`, before the files go) with the same condition
+  as the unenroll action, so never in a major upgrade. It deletes everything in `C:\ProgramData\Rulebox` except `logs\`
+  (`state\` with `secrets.bin` and the journal, `downloads\`, `selfupdate\`, `installer-temp\`, `icons\`, `drivers\`, loose
+  files) and adds one line to `logs\purge-data.log`. It refuses a data directory that is a link or not protected as
+  expected, never follows a link, reports a file that is still open and goes on. Errors are ignored by the MSI.
 - **Old Staff App folders.** The agent closes the Staff App before an agent-driven upgrade (`selfupdate.rs`), so no file is in
   use; `RemoveFolderEx` removes `versions\` at uninstall (and when a major upgrade removes the old product) as a safety net.
-- **Not changed:** the empty `HKLM\SOFTWARE\Policies\Microsoft\Windows\OOBE` key the kiosk journal leaves behind (no effect).
+- **Empty policy keys (Q-A7, 2026-11-28):** a restore (Disable kiosk, unenroll, `recover`) now also removes the empty HKLM policy
+  keys Rulebox itself created (`...\Windows\OOBE`, `...\PowerSettings\0e796bdb-...`, `...\Printers\PointAndPrint`), but only those
+  the agent recorded creating (`createdMachineKeys` in the agent state) and only while they are empty. A PC set up by an older
+  agent has no record, so its leftover empty keys stay.
 - Needs the VM (nothing here was run): the unenroll action over the admin pipe as SYSTEM, `RemoveFolderEx` with the
-  `VERSIONSFOLDERPATH` property, a major upgrade that leaves the enrolled PC enrolled.
+  `VERSIONSFOLDERPATH` property, a major upgrade that leaves the enrolled PC enrolled, and (Q-A6) that after an uninstall
+  only `ProgramData\Rulebox\logs\` is left while a major upgrade keeps `state\`, `secrets.bin` and `downloads\`.
 
 ## WiX v7 EULA (OSMF) record
 

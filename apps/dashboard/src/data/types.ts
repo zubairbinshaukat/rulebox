@@ -78,7 +78,15 @@ export interface Me {
    * (every member write answers `step_up_setup_required` until then). Lockout counts and
    * "reset by email" are in `stepUp:status.pin`, not here.
    */
-  pin: { required: boolean; set: boolean };
+  pin: {
+    required: boolean;
+    set: boolean;
+    /**
+     * The PIN is set but its recovery codes were never made (setup left unfinished): resume at step 2.
+     * Optional: absent (an older server) counts as false.
+     */
+    codesPending?: boolean;
+  };
   serverApiVersion: number;
 }
 export interface NoAccess {
@@ -123,23 +131,6 @@ export interface PasskeyRow {
 }
 
 /**
- * `stepUp:status.pin` (the lock screen\x27s source). `lockedUntil` is server time; the PIN is locked
- * while it is in the future: `lockKind` "lockout" is the long lockout (24 h, 72 h, 7 days),
- * "backoff" a short wait after a few wrong tries. `attemptsBeforeLockout` counts down from 10.
- * (The server still sends the Phase 4 `actionPin` object too; the dashboard ignores it.)
- */
-export interface PinStatus {
-  set: boolean;
-  lockedUntil: number | null;
-  lockKind: "backoff" | "lockout" | null;
-  failedSinceUnlock: number;
-  attemptsBeforeLockout: number;
-  recoveryCodesLeft: number;
-  /** The forgot-PIN email is configured on this deployment. */
-  resetByEmail: boolean;
-}
-
-/**
  * `stepUp:status.pin`, the lock screen's source. `lockedUntil` is server time: the PIN is locked
  * while it is in the future. `lockKind` "lockout" is the long lockout (24 h, 72 h, 7 days),
  * "backoff" a short wait after a few wrong tries. `attemptsBeforeLockout` counts down from 10.
@@ -152,6 +143,11 @@ export interface PinStatus {
   failedSinceUnlock: number;
   attemptsBeforeLockout: number;
   recoveryCodesLeft: number;
+  /**
+   * The deployment can make recovery codes (its server secret is set). False: PIN setup can't finish
+   * until an operator fixes it. Optional: absent (an older server) counts as true.
+   */
+  recoveryAvailable?: boolean;
   /** The forgot-PIN email is configured on this deployment. */
   resetByEmail: boolean;
 }
@@ -1450,7 +1446,7 @@ export const DEFAULT_LOCKDOWN_SETTINGS: LockdownSettings = {
     hideSwitchUser: true,
     hideSignInPower: true,
     denyElevationRequests: true,
-    hideAdminTiles: true,
+    hideAdminTiles: false,
     noWakePassword: true,
     restrictPrinterDrivers: true,
     fileOutputPrinters: true,

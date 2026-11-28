@@ -29,7 +29,8 @@ struct Module {
 }
 
 const MODULES: &[Module] = &[
-    Module { file: "machinereg", read_only: &["get_machine_value", "list_value_names"], guarded: 2 },
+    // (Q-A7) `key_exists` only reads; `delete_key_if_empty` removes an emptied policy key Rulebox created (guarded).
+    Module { file: "machinereg", read_only: &["get_machine_value", "list_value_names", "key_exists"], guarded: 3 },
     // (Step 18) `list_value_names` only reads (the Staff start-up entries).
     // (Phase 6 Step 17) `delete_key_if_empty` removes an emptied browser policy key (guarded).
     Module { file: "staffreg", read_only: &["read_value", "list_value_names"], guarded: 3 },

@@ -96,6 +96,19 @@ describe("lockdown:groupView and lockdown:update", () => {
     await expectCode(save(e, { ...D, accessibilityTools: true }, 0, e.viewer), "forbidden");
   });
 
+  test("`hideAdminTiles` is off for a new group (owner 2026-11-28); a group that already saved it on keeps it", async () => {
+    expect(D.machine.hideAdminTiles).toBe(false);
+    const e = await setup();
+    const fresh = await e.viewer.query(api.lockdown.groupView, { groupId: e.groupId });
+    expect(fresh.settings.machine.hideAdminTiles).toBe(false);
+    // An existing group's stored value is never flipped by the new default (no migration).
+    await e.t.run((ctx) =>
+      ctx.db.insert("groupLockdown", { orgId: e.orgId, groupId: e.groupId, settings: { ...D, machine: { ...D.machine, hideAdminTiles: true } }, revision: 1 }),
+    );
+    const stored = await e.viewer.query(api.lockdown.groupView, { groupId: e.groupId });
+    expect(stored.settings.machine.hideAdminTiles).toBe(true);
+  });
+
   test("the same settings again write nothing; a plain switch needs no fresh step-up and audits settingsChanged", async () => {
     const e = await setup();
     const same = await probe(() => save(e, D, 0));

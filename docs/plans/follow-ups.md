@@ -54,6 +54,8 @@ tablet, laptop and wide desktop widths (screenshots) before calling it done.
   this within a minute." and show per-group "PCs up to date: n of m".
 
 ### Bug: "Hide administrator accounts" is ON by default and blocks the whole lockdown (VM run A3, 2026-11-28)
+**DONE locally 2026-11-28 (branch `t3/post-vm-run-a3-followups`, needs the VM re-test):** default `false` for new groups (existing groups keep their stored value), the agent skips only that option without E-71 and reports the layer note `admin_tiles_skipped` (machine layer, shown on the device's Lockdown card), `admin_signin_unverified` is no longer produced. Original problem text below.
+
 - `DEFAULT_LOCKDOWN_SETTINGS.hideAdminTiles = true` (`convex/lib/lockdownValidators.ts:94`). A PC that never
   recorded E-71 (Other user sign-in works) refuses the **whole** lockdown section (`admin_signin_unverified`,
   guard I7), so a new group's PCs get no lockdown at all.
@@ -145,21 +147,26 @@ up front.
 Questions from `docs/plans/phase-6-vm-results.md` "Run A3". All answered with the recommendation.
 
 - **Q-A4 (hideAdminTiles default):** answered as (c) both, see the bug section above.
-- **Q-A5 (deleted employee's browser profile):** after a roster change removes an employee, the agent runs a
+- **Q-A5 (deleted employee's browser profile) — DONE locally 2026-11-28, needs the VM** (`cleanup.rs` profile-only round at agent start and after every roster change, retried every 30 s while somebody is signed in): after a roster change removes an employee, the agent runs a
   profile-only cleanup for that employee's browser profile the next time nobody is signed in (not only at
   the next employee sign-out). Tests: removal while signed out, while another employee is signed in, across
   a restart.
-- **Q-A6 (ProgramData after uninstall):** the uninstall-only step deletes everything in
+- **Q-A6 (ProgramData after uninstall) — DONE locally 2026-11-28, needs the VM:** `PurgeDataAtUninstall` (new MSI action running `rulebox-agent purge-data` after StopServices, same condition as the unenroll); the uninstall-only step deletes everything in
   `C:\ProgramData\Rulebox` except `logs\` (so `state\` incl. `secrets.bin`, and `downloads\`). Must not run on
   major upgrade (same rule as UnenrollAtUninstall).
-- **Q-A7 (empty policy keys):** low priority, after the main fixes: on uninstall/restore remove the policy keys
+- **Q-A7 (empty policy keys) — DONE locally 2026-11-28, needs the VM** (`journal.rs` `record_created_keys` / `prune_created_keys`, `machinereg::check_created_key`; state field `createdMachineKeys`; PCs set up before this change have no record and keep their empty keys): low priority, after the main fixes: on uninstall/restore remove the policy keys
   Rulebox itself created (OOBE, PowerSettings\0e796bdb…, PointAndPrint), only when they are empty.
-- **Q-A8 (stuck restore):** add `recover --forget <id>`: admin only, asks for confirmation, refuses unless the
+- **Q-A8 (stuck restore) — DONE locally 2026-11-28, needs the VM** (`recover --forget <id> [--yes]`, `recover.rs::forget_interactive`; a `recover` that fails to restore an entry now prints the ids to use; log in `logs\recover-forget.log`): add `recover --forget <id>`: admin only, asks for confirmation, refuses unless the
   entry's live value already equals the recorded original, writes an audit/log line.
 
 ## Dashboard onboarding: PIN setup (Phase 4b) edge cases — found 2026-11-28
 
 Seen on the dev deployment `gallant-ocelot-38` while preparing VM run A3.
+
+**Status 2026-11-28: items 1-5 done** (branch `t3/pin-setup-edge-cases`; not pushed). Setup is "unfinished" on the
+server as `account:me.pin.codesPending` (PIN set, recovery codes never made, pepper set); `stepUp:status.pin.recoveryAvailable`
+says up front whether codes can be made; `setActionPin` refuses a first PIN without the pepper; a dismissible
+passkey banner (`stepup/PasskeyReminder.tsx`) links to Settings, Security.
 
 1. **A missing server secret shows only "This isn't ready yet. Try again in a moment."** Step 2 (recovery
    codes) failed because `RULEBOX_RECOVERY_PEPPER` was not set (`convex/lib/recoveryCodes.ts`, `not_ready`).

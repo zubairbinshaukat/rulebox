@@ -956,3 +956,133 @@ fn a_pending_driver_entry_is_never_settled_by_a_guess() {
     assert_eq!(rig.shared.read(|s| s.journal[0].phase), EntryPhase::Pending, "left exactly as it is");
     assert!(rig.platform.with_world(|w| w.driver_deletes.is_empty()));
 }
+
+// -- Q-A7 (owner 2026-11-28): the empty policy keys Rulebox itself created go with the restore ------------------------------
+
+const OOBE: &str = r"SOFTWARE\Policies\Microsoft\Windows\OOBE";
+const POWER: &str = r"SOFTWARE\Policies\Microsoft\Power\PowerSettings\0e796bdb-100d-47d6-a2d5-f7d2daa51f51";
+const POINT_AND_PRINT: &str = r"SOFTWARE\Policies\Microsoft\Windows NT\Printers\PointAndPrint";
+
+fn policy(path: &str, name: &str) -> RegValueRef {
+    RegValueRef { path: path.to_string(), name: name.to_string() }
+}
+
+fn dword(path: &str, name: &str, value: u32) -> Change {
+    Change::machine(JournalOwner::Kiosk, policy(path, name), Some(RegData::Dword(value)))
+}
+
+fn key_exists(rig: &Rig, path: &str) -> bool {
+    rig.platform.machine_key_exists(path).unwrap()
+}
+
+fn recorded(rig: &Rig) -> Vec<String> {
+    rig.shared.get().created_machine_keys
+}
+
+#[test]
+fn a_key_rulebox_made_is_removed_with_its_last_value_and_forgotten() {
+    let rig = Rig::new();
+    change(&rig.ctx(), &dword(OOBE, "DisablePrivacyExperience", 1)).unwrap();
+    change(&rig.ctx(), &dword(POINT_AND_PRINT, "RestrictDriverInstallationToAdministrators", 1)).unwrap();
+    assert!(key_exists(&rig, OOBE) && key_exists(&rig, POINT_AND_PRINT));
+    // Only the keys at or below a written root are recorded: not `...\Windows`, not `...\Windows NT`.
+    let mut now = recorded(&rig);
+    now.sort();
+    assert_eq!(now, [r"SOFTWARE\Policies\Microsoft\Windows NT\Printers".to_string(), POINT_AND_PRINT.to_string(), OOBE.to_string()]);
+    // The recorded keys are on disk (a restart still knows them).
+    assert!(rig.state_file().contains("createdMachineKeys"));
+    assert_eq!(rig.restarted().get().created_machine_keys.len(), 3);
+
+    assert!(restore_all(&rig.ctx()).is_complete());
+    assert!(rig.value(&policy(OOBE, "DisablePrivacyExperience")).is_none());
+    assert!(!key_exists(&rig, OOBE), "the OOBE key is gone");
+    assert!(!key_exists(&rig, POINT_AND_PRINT), "PointAndPrint is gone");
+    assert!(!key_exists(&rig, r"SOFTWARE\Policies\Microsoft\Windows NT\Printers"), "so is the Printers key Rulebox made for it");
+    assert!(key_exists(&rig, r"SOFTWARE\Policies\Microsoft\Windows"), "a parent above the written roots is never touched");
+    assert!(recorded(&rig).is_empty());
+    assert!(rig.shared.get().journal.is_empty());
+}
+
+#[test]
+fn a_key_with_two_values_stays_until_the_second_one_is_restored() {
+    let rig = Rig::new();
+    change(&rig.ctx(), &dword(POWER, "ACSettingIndex", 0)).unwrap();
+    change(&rig.ctx(), &dword(POWER, "DCSettingIndex", 0)).unwrap();
+    // One entry goes back: the key still holds the other value.
+    assert!(restore_entry(&rig.ctx(), &machine_id(&policy(POWER, "DCSettingIndex"))).is_ok());
+    assert!(key_exists(&rig, POWER));
+    assert_eq!(recorded(&rig).iter().filter(|key| key.as_str() == POWER).count(), 1);
+    assert!(restore_entry(&rig.ctx(), &machine_id(&policy(POWER, "ACSettingIndex"))).is_ok());
+    assert!(!key_exists(&rig, POWER));
+    // The PowerSettings root Rulebox made for it goes as well; the `Power` key above it was never written.
+    assert!(!key_exists(&rig, r"SOFTWARE\Policies\Microsoft\Power\PowerSettings"));
+    assert!(recorded(&rig).is_empty());
+}
+
+#[test]
+fn a_key_that_was_already_there_is_never_recorded_and_never_removed() {
+    let rig = Rig::new();
+    // An administrator's own value made the key before Rulebox.
+    rig.set(policy(OOBE, "SomethingElse"), RegData::Dword(5));
+    rig.set(policy(POWER, "Other"), RegData::Dword(1));
+    change(&rig.ctx(), &dword(OOBE, "DisablePrivacyExperience", 1)).unwrap();
+    change(&rig.ctx(), &dword(POWER, "ACSettingIndex", 0)).unwrap();
+    assert!(recorded(&rig).is_empty(), "{:?}", recorded(&rig));
+    assert!(restore_all(&rig.ctx()).is_complete());
+    assert!(key_exists(&rig, OOBE) && key_exists(&rig, POWER));
+    assert_eq!(rig.value(&policy(OOBE, "SomethingElse")), Some(RegData::Dword(5)));
+    assert!(!rig.platform.calls().contains(&SimOp::DeleteMachineKeyIfEmpty), "not even asked");
+}
+
+#[test]
+fn a_key_that_holds_something_else_when_the_value_goes_back_stays_and_stays_recorded() {
+    let rig = Rig::new();
+    change(&rig.ctx(), &dword(OOBE, "DisablePrivacyExperience", 1)).unwrap();
+    // An administrator adds a value of their own while the kiosk is on.
+    rig.set(policy(OOBE, "AdminValue"), RegData::Dword(9));
+    assert!(restore_all(&rig.ctx()).is_complete());
+    assert!(key_exists(&rig, OOBE));
+    assert_eq!(rig.value(&policy(OOBE, "AdminValue")), Some(RegData::Dword(9)));
+    assert_eq!(recorded(&rig), [OOBE.to_string()], "tried again at the next restore below it");
+}
+
+#[test]
+fn a_key_outside_the_written_roots_and_a_second_change_record_nothing() {
+    let rig = Rig::new();
+    change(&rig.ctx(), &set_to("V", "x")).unwrap(); // `SOFTWARE\Rulebox\JournalTest`: not a root the agent writes
+    assert!(recorded(&rig).is_empty());
+    assert!(restore_all(&rig.ctx()).is_complete());
+    assert!(!rig.platform.calls().contains(&SimOp::DeleteMachineKeyIfEmpty));
+    // A write in a key that now exists records nothing new (the entry was recorded the first time).
+    change(&rig.ctx(), &dword(OOBE, "A", 1)).unwrap();
+    change(&rig.ctx(), &dword(OOBE, "B", 1)).unwrap();
+    assert_eq!(recorded(&rig), [OOBE.to_string()]);
+}
+
+#[test]
+fn the_key_goes_when_the_agent_was_restarted_between_the_write_and_the_restore() {
+    let rig = Rig::new();
+    change(&rig.ctx(), &dword(OOBE, "DisablePrivacyExperience", 1)).unwrap();
+    let again = rig.restarted();
+    let ctx = JournalCtx { platform: rig.platform.as_ref(), shared: again.as_ref() };
+    assert!(restore_all(&ctx).is_complete());
+    assert!(!key_exists(&rig, OOBE));
+}
+
+#[test]
+fn a_key_that_cannot_be_read_is_not_recorded_and_a_failed_delete_does_not_fail_the_restore() {
+    let rig = Rig::new();
+    rig.platform.fail_next(SimOp::MachineKeyExists, PlatformError::AccessDenied);
+    change(&rig.ctx(), &dword(OOBE, "DisablePrivacyExperience", 1)).unwrap();
+    assert!(recorded(&rig).is_empty(), "unknown: not ours to remove");
+    let rig = Rig::new();
+    change(&rig.ctx(), &dword(OOBE, "DisablePrivacyExperience", 1)).unwrap();
+    rig.platform.fail_next(SimOp::DeleteMachineKeyIfEmpty, PlatformError::AccessDenied);
+    assert!(restore_all(&rig.ctx()).is_complete(), "the value is back whatever happens to the key");
+    assert!(key_exists(&rig, OOBE));
+    assert_eq!(recorded(&rig), [OOBE.to_string()]);
+    // The next restore (here: a second value written and restored) finishes it.
+    change(&rig.ctx(), &dword(OOBE, "X", 1)).unwrap();
+    assert!(restore_all(&rig.ctx()).is_complete());
+    assert!(!key_exists(&rig, OOBE));
+}

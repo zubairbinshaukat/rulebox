@@ -35,6 +35,7 @@ mod network;
 mod notice;
 mod paths;
 mod platform;
+mod purge;
 mod recover;
 mod report;
 mod roster;
@@ -125,12 +126,22 @@ fn dispatch(cli: Cli) -> anyhow::Result<u8> {
         Command::Service { action: ServiceAction::Uninstall { force } } => {
             Ok(service::run_uninstall(force, &mut std::io::stdout().lock(), &mut std::io::stderr().lock()))
         }
-        Command::Recover { yes } => Ok(recover::run_recover(
+        Command::Recover { yes, forget: None } => Ok(recover::run_recover(
             yes,
             &mut std::io::stdin().lock(),
             &mut std::io::stdout().lock(),
             &mut std::io::stderr().lock(),
         )),
+        // (Q-A8) One journal entry whose value is already back; the rest of `recover` does not run.
+        Command::Recover { yes, forget: Some(id) } => Ok(recover::run_forget(
+            &id,
+            yes,
+            &mut std::io::stdin().lock(),
+            &mut std::io::stdout().lock(),
+            &mut std::io::stderr().lock(),
+        )),
+        // (Q-A6) The MSI's uninstall-only step: everything in the data directory but `logs\`.
+        Command::PurgeData => Ok(purge::run_purge_data(&mut std::io::stdout().lock(), &mut std::io::stderr().lock())),
         // The admin commands talk to the running service over the admin pipe. They
         // start no logging and open no data directory (plan Section 5.1).
         Command::Status { json, simulate } => {
