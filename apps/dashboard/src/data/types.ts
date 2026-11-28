@@ -459,7 +459,79 @@ export interface DocVersion {
   reason: string;
 }
 
-/** `fleet:get` */
+/**
+ * `fleet:page` (UI pass 2026-11, `docs/plans/ui-pass/device-detail.md` 6.1): the header, the Overview and the Protection tab of the
+ * device page, in one subscription for the whole page. It replaces `fleet:get`, so there is no group list, no versions and no
+ * rollout revision here: the Settings tab has `useDeviceSettingsOptions`, the Activity tab `useDeviceVersions`, the Network tab
+ * `useDeviceNetwork`. The server always sends the display, lockdown and lock fields; the live mapper fills what an older server lacks.
+ */
+export interface DevicePage {
+  _id: Id;
+  name: string;
+  revision: number;
+  revoked: boolean;
+  kioskEnabled: boolean;
+  enrolledAt: number;
+  group: GroupOption | null;
+  /** This PC's own display choice and its group's (`auto` = none). */
+  displayMode: DisplayChoice;
+  groupDisplayMode: DisplayChoice;
+  presence: DevicePresence;
+  /** The report as `fleet:get` had it; `report.outOfSupport` is `outOfSupport` below. */
+  report: DeviceReport | null;
+  /** The summary's out-of-support flag (also `report.outOfSupport`; there is no report before the first one). */
+  outOfSupport: boolean;
+  /** The head's newest published version and plan state; null before the first publish. */
+  latestVersion: number | null;
+  planState: DevicePlanState | null;
+  flags: { noGroup: boolean; revoked: boolean; rotateCredential: boolean };
+  /** The PC's device lock (plan 4.17), or null. */
+  lock: DeviceLock | null;
+  /** The lockdown fields (formerly `DeviceLockdown`, read by the Protection tab). */
+  ring: Ring;
+  /** "Allow USB for this PC": until when (ms), or null. */
+  usbAllowUntil: number | null;
+  /** Physical protection as the agent reports it (plan 4.16); null until it reports. */
+  protection: SecurityPosture | null;
+  /** Does the agent know lockdown? null before its first report. */
+  lockdownCapable: boolean | null;
+  /** The PC's apply report (fixed codes only); null until it sends one. */
+  apply: ApplyReport | null;
+  /**
+   * Failed installs that still count (the PC's group still assigns the app, the app is not archived), from the newest 10 failed
+   * results: `count` of those, `more` = the range was full (show "n+"), `names` at most two app names (newest first).
+   */
+  failedInstalls: { count: number; more: boolean; names: string[] };
+  /** Wi-Fi networks and printers whose apply result on this PC is "failed" (counted from its apply report). */
+  network: { wifiFailed: number; printersFailed: number };
+}
+
+/** `fleet:deviceSettings` (Settings tab, subscribed only while it is open). */
+export interface DeviceSettingsOptions {
+  /** The group picker's options, sorted by name (`groups.by_org` `.take(500)`). */
+  groups: GroupOption[];
+  /** The PC's group's rollout revision (what `rollouts:setRings` wants back); 0 = no rollout row or no group. */
+  rolloutRevision: number;
+}
+
+/** The state of one Wi-Fi network or printer on one PC (the buckets of `networks.ts`: applied / failed / unsupported / the rest). */
+export type NetworkItemState = "working" | "failed" | "waiting" | "notSupported";
+
+/** `fleet:network` (Network tab, subscribed only while it is open): the items of the PC's group with their state on THIS PC. Never a passphrase, address, URL or hash. */
+export interface DeviceNetwork {
+  groupId: Id | null;
+  /** When the PC last sent its apply report; null before the first. */
+  reportedAt: number | null;
+  wifi: { _id: Id; name: string; state: NetworkItemState; detail: string | null }[];
+  printers: { _id: Id; name: string; isDefault: boolean; state: NetworkItemState; detail: string | null }[];
+  /** A driver without a result yet has state `pending`. */
+  drivers: { _id: Id; name: string; state: InstallState; detail: string | null }[];
+}
+
+/**
+ * `fleet:get`.
+ * @deprecated UI pass 2026-11: the device page reads `DevicePage` (`useDevicePage`). Kept until the page is rebuilt on it.
+ */
 export interface DeviceDetail {
   _id: Id;
   name: string;
@@ -489,6 +561,11 @@ export interface DeviceLockdown {
   /** The PC's rollout ring, its group and that group's rollout revision (what `rollouts:setRings` wants back). */
   ring: Ring;
   groupId: Id | null;
+  /**
+   * @deprecated UI pass 2026-11: the page query has no rollout row; the Settings tab gets it from `useDeviceSettingsOptions`.
+   * Still required and still filled from `fleet:get` only because the old cards (`lockdown/DeviceCards.tsx` RingPicker) read it as
+   * a `number` and another builder is editing that file; make it optional, then remove it, when the ring picker moves to Settings.
+   */
   rolloutRevision: number;
   revoked: boolean;
   /** "Allow USB for this PC": until when (ms), or null. */

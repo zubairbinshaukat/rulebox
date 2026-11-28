@@ -8,4 +8,4 @@ import type { DevicesApi } from "./api";
 
 const api: DevicesApi = devicesApi;
 
-export const { useDevicesCount, useDevicesScreen, useDeviceInstalls } = api;
+export const { useDevicesCount, useDevicesScreen, useDeviceInstalls, useDeviceSettingsOptions, useDeviceVersions, useDeviceNetwork } = api;

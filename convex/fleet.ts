@@ -10,7 +10,7 @@ import { fail } from "./lib/errors";
 import { credOf, revokeDevice } from "./lib/fleet";
 import { checkPageSize, cleanSearch, countResult, orgStatsRow, pickSort, sortArg } from "./lib/listing";
 import { internalMutation, memberMutation, memberQuery } from "./lib/functions";
-import { assignedAppsOf, retagDeviceInstalls } from "./lib/installs";
+import { assignedAppsOf, liveChecker, retagDeviceInstalls } from "./lib/installs";
 import { cleanNoticeText } from "./lib/noticeText";
 import { applyState, layerStates, ring as ringValidator, securityPosture, type RingValue } from "./lib/lockdownValidators";
 import {
@@ -22,7 +22,10 @@ import {
   MAX_INSTALL_PAGE,
   MAX_LOCK_CONTACT,
   MAX_LOCK_MESSAGE,
+  MAX_ORG_DRIVERS,
+  MAX_ORG_PRINTERS,
   MAX_USB_ALLOW_HOURS,
+  MAX_WIFI_PROFILES,
   HOUR_MS,
   MINUTE_MS,
   PURGE_BATCH,
@@ -243,6 +246,11 @@ const reportValue = v.object({
 });
 
 /**
+ * DEPRECATED (UI pass 2026-11): the dashboard no longer calls this; the device page reads `fleet:page` (header, Overview,
+ * Protection) plus one small query per open tab (`fleet:deviceSettings`, `fleet:versions`, `fleet:network`). Kept unchanged
+ * for one release so a dashboard bundle older than the server keeps working during a deploy; delete it with its
+ * `ioBudgets` / `matrixRows` rows and move its Convex tests to `fleet:page` (see `docs/plans/follow-ups.md`).
+ *
  * One device for its detail page (viewer). `versions`: the last KEEP_VERSIONS
  * signed versions (`desiredVersions`, ~150 B each; never a payload). Never a hash.
  */
@@ -383,6 +391,329 @@ export const get = memberQuery("viewer")({
           ? null
           : { lockId: deviceLock.lockId, message: deviceLock.message, contact: deviceLock.contact, lockedAt: deviceLock.lockedAt },
       groups: groups.map((g) => ({ _id: g._id, name: g.name })).sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  },
+});
+
+// ---------------------------------------------------------------- the device page (UI pass 2026-11)
+//
+// `fleet:page` feeds the header, the Overview and the Protection tab and stays subscribed for the whole page; every
+// other tab has one small query of its own that is subscribed only while that tab is open (`deviceSettings`,
+// `versions`, `network`; the installs and history tabs keep `fleet:installs` and `audit:forTarget`). All are viewer
+// queries; a foreign or unknown id answers `not_found` like `fleet:get`. None reads liveness, a body or a hash.
+
+/** The newest failed install results of one PC that `fleet:page` looks at (the badge shows "n+" when the range is full). */
+const FAILED_INSTALL_RANGE = 10;
+/** App names `fleet:page` returns for the "Zoom could not be installed" problem title. */
+const FAILED_INSTALL_NAMES = 2;
+
+const lockValue = v.object({ lockId: v.string(), message: v.string(), contact: v.optional(v.string()), lockedAt: v.number() });
+
+const applyValue = v.object({
+  state: applyState,
+  refusal: v.union(v.string(), v.null()),
+  layers: layerStates,
+  appliedVersion: v.number(),
+  lkgVersion: v.union(v.number(), v.null()),
+  configVersion: v.union(v.number(), v.null()),
+  updatedAt: v.number(),
+});
+
+/** One Wi-Fi network or printer on one PC: the same buckets as `networks.ts` (applied / failed / unsupported / the rest = waiting). */
+const networkItemState = v.union(v.literal("working"), v.literal("failed"), v.literal("waiting"), v.literal("notSupported"));
+type NetworkItemState = "working" | "failed" | "waiting" | "notSupported";
+
+function networkStateOf(state: string | undefined): NetworkItemState {
+  if (state === "applied") return "working";
+  if (state === "failed") return "failed";
+  if (state === "unsupported") return "notSupported";
+  return "waiting";
+}
+
+/**
+ * The PC's failed install results that still count (lib/installs.ts `liveChecker`: the PC's group still assigns the app, the
+ * app is not archived, the result is tagged with the PC's group). Reads the newest FAILED_INSTALL_RANGE failed rows
+ * (`installResults.by_device_state_updated`) and at most one app and one assignment per row. A revoked PC or one without a
+ * group counts nothing. `more`: the range was full, so there may be more.
+ */
+async function failedInstallsOf(ctx: { db: DatabaseReader }, device: Doc<"devices">, revoked: boolean) {
+  const none = { count: 0, more: false, names: [] as string[] };
+  if (revoked || device.groupId === undefined) return none;
+  const rows = await ctx.db
+    .query("installResults")
+    .withIndex("by_device_state_updated", (q) => q.eq("deviceId", device._id).eq("state", "failed"))
+    .order("desc")
+    .take(FAILED_INSTALL_RANGE);
+  const check = liveChecker(ctx);
+  let count = 0;
+  const names: string[] = [];
+  for (const r of rows) {
+    if (r.groupId !== device.groupId || !(await check.live(r.groupId, r.appId))) continue;
+    count++;
+    if (names.length < FAILED_INSTALL_NAMES) {
+      const app = await check.app(r.appId);
+      if (app !== null) names.push(app.name);
+    }
+  }
+  return { count, more: rows.length === FAILED_INSTALL_RANGE, names };
+}
+
+/**
+ * One PC for the top of its detail page (viewer): everything the header, the Overview tiles, "Needs attention", About and the
+ * Protection tab show, in one subscription (`fleet:get` without the group list, the versions and the rollout row, plus
+ * the head's `latestVersion` / `planState`, the failed-install count and the Wi-Fi / printer failure counts).
+ * Reads: device, credentials, presence, summary, report (compat <= 32 KB), head (~250 B), apply report (~2.5 KB), lock, the
+ * PC's group (`db.get`, never the group list) and at most FAILED_INSTALL_RANGE failed results with their apps and
+ * assignments (worst case 3 + 9 + 30 = 42 reads, ~60 KB). `network` counts from the apply report the row already read.
+ * Never reads liveness (`fleet:liveness` does) or a document body, and never returns a hash.
+ */
+export const page = memberQuery("viewer")({
+  args: { deviceId: v.string() },
+  returns: v.object({
+    _id: v.id("devices"),
+    name: v.string(),
+    revision: v.number(),
+    kioskEnabled: v.boolean(),
+    enrolledAt: v.number(),
+    revoked: v.boolean(),
+    group: v.union(v.object({ _id: v.id("groups"), name: v.string() }), v.null()),
+    /** This PC's own display-mode choice and its group's (`auto` = none). */
+    displayMode: displayModeOverride,
+    groupDisplayMode: displayModeOverride,
+    presence: presenceValue,
+    /** `deviceSummary.outOfSupport` (computed on write). */
+    outOfSupport: v.boolean(),
+    report: v.union(reportValue, v.null()),
+    /** The head's newest published version and plan state; null before the first publish. */
+    latestVersion: v.union(v.number(), v.null()),
+    planState: v.union(v.literal("ok"), v.literal("overLimit"), v.literal("suspended"), v.null()),
+    flags: v.object({ noGroup: v.boolean(), revoked: v.boolean(), rotateCredential: v.boolean() }),
+    lock: v.union(lockValue, v.null()),
+    ring: ringValidator,
+    usbAllowUntil: v.union(v.number(), v.null()),
+    protection: v.union(securityPosture, v.null()),
+    lockdownCapable: v.union(v.boolean(), v.null()),
+    apply: v.union(applyValue, v.null()),
+    /** Failed installs that still count: `count` of the newest FAILED_INSTALL_RANGE (`more` = the range was full), `names` <= 2. */
+    failedInstalls: v.object({ count: v.number(), more: v.boolean(), names: v.array(v.string()) }),
+    /** Wi-Fi networks and printers whose apply result on this PC is "failed" (counted from the apply report). */
+    network: v.object({ wifiFailed: v.number(), printersFailed: v.number() }),
+  }),
+  handler: async (ctx, args) => {
+    const d = await getInOrg(ctx, "devices", args.deviceId, ctx.orgId);
+    const cred = await credOf(ctx, d);
+    const revoked = cred.state === "revoked";
+    const [presence, summary, report, head, apply, deviceLock, group] = await Promise.all([
+      presenceOf(ctx, d),
+      summaryOf(ctx, d._id),
+      ctx.db
+        .query("deviceReports")
+        .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+        .unique(),
+      headOf(ctx, d._id),
+      ctx.db
+        .query("deviceApplyReports")
+        .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+        .first(),
+      ctx.db
+        .query("deviceLocks")
+        .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+        .first(),
+      d.groupId === undefined ? Promise.resolve(null) : ctx.db.get(d.groupId),
+    ]);
+    const rotateCredential = cred.row?.rotate === true || (cred.row === null && d.rotateCredential === true);
+    const capabilities = report?.capabilities ?? apply?.capabilities;
+    return {
+      _id: d._id,
+      name: d.name,
+      revision: d.revision ?? 0,
+      kioskEnabled: d.kioskEnabled !== false,
+      enrolledAt: d.enrolledAt,
+      revoked,
+      group: group !== null ? { _id: group._id, name: group.name } : null,
+      displayMode: d.displayMode ?? "auto",
+      groupDisplayMode: group?.displayMode ?? "auto",
+      presence,
+      outOfSupport: summary?.outOfSupport === true,
+      report:
+        report === null
+          ? null
+          : {
+              agentVersion: report.agentVersion,
+              os: report.os,
+              osBuild: report.osBuild,
+              osEdition: report.osEdition,
+              ramMb: report.ramMb,
+              diskFreeGb: report.diskFreeGb,
+              lockdownLevel: report.lockdownLevel,
+              kioskPhase: report.kioskPhase,
+              kioskError: report.kioskError,
+              appliedVersion: report.appliedVersion,
+              shellHealth: report.shellHealth,
+              compat: report.compat,
+              trustedKeyIds: report.trustedKeyIds,
+              restartPending: report.restartPending,
+              updatedAt: report.updatedAt,
+            },
+      latestVersion: head?.version ?? null,
+      planState: head?.planState ?? null,
+      flags: { noGroup: d.groupId === undefined, revoked, rotateCredential },
+      lock:
+        deviceLock === null
+          ? null
+          : { lockId: deviceLock.lockId, message: deviceLock.message, contact: deviceLock.contact, lockedAt: deviceLock.lockedAt },
+      ring: (d.ring ?? "everyone") as RingValue,
+      usbAllowUntil: d.usbTempAllowUntil ?? null,
+      protection: report?.security ?? null,
+      lockdownCapable: report === null && apply === null ? null : (capabilities ?? []).includes("lockdown/1"),
+      apply:
+        apply === null
+          ? null
+          : {
+              state: apply.state,
+              refusal: apply.refusal ?? null,
+              layers: apply.layers,
+              appliedVersion: apply.appliedVersion,
+              lkgVersion: apply.lkgVersion ?? null,
+              configVersion: apply.config?.version ?? null,
+              updatedAt: apply.updatedAt,
+            },
+      failedInstalls: await failedInstallsOf(ctx, d, revoked),
+      network: {
+        wifiFailed: apply?.wifi.filter((w) => networkStateOf(w.state) === "failed").length ?? 0,
+        printersFailed: apply?.printers.filter((p) => networkStateOf(p.state) === "failed").length ?? 0,
+      },
+    };
+  },
+});
+
+/**
+ * The Settings tab's options (viewer; subscribed only while the tab is open): the group picker's groups (`groups.by_org`,
+ * `.take(MAX_GROUPS_JOINED)`, sorted by name) and the PC's group's rollout revision (what `rollouts:setRings` wants back for the
+ * "Gets changes" picker; 0 = no rollout row yet or no group). Reads: device + groups (<= 500) + 1. Re-runs on any group
+ * change of the organization.
+ */
+export const deviceSettings = memberQuery("viewer")({
+  args: { deviceId: v.string() },
+  returns: v.object({
+    groups: v.array(v.object({ _id: v.id("groups"), name: v.string() })),
+    rolloutRevision: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const d = await getInOrg(ctx, "devices", args.deviceId, ctx.orgId);
+    const groups = await ctx.db
+      .query("groups")
+      .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
+      .take(MAX_GROUPS_JOINED);
+    const groupId = d.groupId;
+    const rollout =
+      groupId === undefined
+        ? null
+        : await ctx.db
+            .query("groupRollouts")
+            .withIndex("by_group", (q) => q.eq("groupId", groupId))
+            .unique();
+    return {
+      groups: groups.map((g) => ({ _id: g._id, name: g.name })).sort((a, b) => a.name.localeCompare(b.name)),
+      rolloutRevision: rollout?.revision ?? 0,
+    };
+  },
+});
+
+/**
+ * The Activity tab's "Settings versions" disclosure (viewer; subscribed only while it is open): the last KEEP_VERSIONS signed
+ * versions of the PC's settings, newest first (`desiredVersions.by_device_version`, ~150 B each; never a payload).
+ */
+export const versions = memberQuery("viewer")({
+  args: { deviceId: v.string() },
+  returns: v.array(v.object({ version: v.number(), createdAt: v.number(), reason: v.string() })),
+  handler: async (ctx, args) => {
+    const d = await getInOrg(ctx, "devices", args.deviceId, ctx.orgId);
+    const rows = await ctx.db
+      .query("desiredVersions")
+      .withIndex("by_device_version", (q) => q.eq("deviceId", d._id))
+      .order("desc")
+      .take(KEEP_VERSIONS);
+    return rows.map((r) => ({ version: r.version, createdAt: r.createdAt, reason: r.reason }));
+  },
+});
+
+/**
+ * The Network tab (viewer; subscribed only while it is open): the Wi-Fi networks, printers and drivers of the PC's group with
+ * their state on THIS PC. The lists are the organization's three tiny tables (`by_org`, `.take(cap + 1)`) narrowed to the
+ * PC's group; the state of a Wi-Fi network or printer is the apply report's item (missing = waiting), a driver's is its
+ * `driverResults` row (`by_device_driver`; none yet = pending). Never a passphrase, address, URL, hash or sealed box. A PC
+ * without a group has nothing. Reads: device, apply report, three tables (<= 51 + 101 + 51), <= 51 driver results.
+ */
+export const network = memberQuery("viewer")({
+  args: { deviceId: v.string() },
+  returns: v.object({
+    groupId: v.union(v.id("groups"), v.null()),
+    /** When the PC last sent its apply report; null before the first. */
+    reportedAt: v.union(v.number(), v.null()),
+    wifi: v.array(v.object({ _id: v.id("wifiProfiles"), name: v.string(), state: networkItemState, detail: v.union(v.string(), v.null()) })),
+    printers: v.array(
+      v.object({ _id: v.id("printers"), name: v.string(), isDefault: v.boolean(), state: networkItemState, detail: v.union(v.string(), v.null()) }),
+    ),
+    drivers: v.array(v.object({ _id: v.id("drivers"), name: v.string(), state: installState, detail: v.union(v.string(), v.null()) })),
+  }),
+  handler: async (ctx, args) => {
+    const d = await getInOrg(ctx, "devices", args.deviceId, ctx.orgId);
+    const apply = await ctx.db
+      .query("deviceApplyReports")
+      .withIndex("by_device", (q) => q.eq("deviceId", d._id))
+      .first();
+    const groupId = d.groupId;
+    const reportedAt = apply?.updatedAt ?? null;
+    if (groupId === undefined) return { groupId: null, reportedAt, wifi: [], printers: [], drivers: [] };
+
+    const wifiRows = await ctx.db
+      .query("wifiProfiles")
+      .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
+      .take(MAX_WIFI_PROFILES + 1);
+    const printerRows = await ctx.db
+      .query("printers")
+      .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
+      .take(MAX_ORG_PRINTERS + 1);
+    const driverRows = await ctx.db
+      .query("drivers")
+      .withIndex("by_org", (q) => q.eq("orgId", ctx.orgId))
+      .take(MAX_ORG_DRIVERS + 1);
+    const driverResults = await ctx.db
+      .query("driverResults")
+      .withIndex("by_device_driver", (q) => q.eq("deviceId", d._id))
+      .take(MAX_ORG_DRIVERS + 1);
+    const resultOf = new Map(driverResults.map((r) => [r.driverId as string, r]));
+    return {
+      groupId,
+      reportedAt,
+      wifi: wifiRows
+        .slice(0, MAX_WIFI_PROFILES)
+        .filter((p) => p.groupIds.includes(groupId))
+        .map((p) => {
+          const item = apply?.wifi.find((w) => w.profileId === p._id);
+          return { _id: p._id, name: p.name, state: networkStateOf(item?.state), detail: item?.detail ?? null };
+        }),
+      printers: printerRows
+        .slice(0, MAX_ORG_PRINTERS)
+        .filter((p) => p.groupIds.includes(groupId))
+        .map((p) => {
+          const item = apply?.printers.find((x) => x.printerId === p._id);
+          return {
+            _id: p._id,
+            name: p.name,
+            isDefault: p.defaultForGroupIds.includes(groupId),
+            state: networkStateOf(item?.state),
+            detail: item?.detail ?? null,
+          };
+        }),
+      drivers: driverRows
+        .slice(0, MAX_ORG_DRIVERS)
+        .filter((x) => x.groupIds.includes(groupId))
+        .map((x) => {
+          const r = resultOf.get(x._id);
+          return { _id: x._id, name: x.name, state: r?.state ?? ("pending" as const), detail: r?.detail ?? null };
+        }),
     };
   },
 });

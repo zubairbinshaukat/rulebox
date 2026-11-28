@@ -22,6 +22,7 @@ export const {
   useOverview,
   useFailedInstallsPage,
   useDeviceDetail,
+  useDevicePage,
   useDeviceLiveness,
   useWatchDevice,
   useCheckNow,

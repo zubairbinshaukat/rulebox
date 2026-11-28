@@ -13,6 +13,7 @@ import type {
   DesktopAppInput,
   DeviceDetail,
   DeviceLiveness,
+  DevicePage,
   EmployeeDetail,
   EmployeeInput,
   FailedInstallRow,
@@ -81,7 +82,16 @@ export interface DataApi {
 
   // ---- devices (fleet:*). The two paginated lists (`useDevicesScreen`,
   // `useDeviceInstalls`) are in their own seam, `./devices`.
+  /**
+   * @deprecated UI pass 2026-11: `fleet:get`, replaced by `useDevicePage`. Stays until the device screen is rebuilt on the page
+   * query; then it is removed with the query.
+   */
   useDeviceDetail: (deviceId: Id) => QueryState<DeviceDetail>;
+  /**
+   * `fleet:page`: the device page's header, Overview and Protection tab, subscribed for the whole page (the other tabs have
+   * their own queries in `./devices`). `not_found` for a foreign or unknown id. Call it next to `useDeviceLiveness`.
+   */
+  useDevicePage: (deviceId: Id) => QueryState<DevicePage>;
   /** `fleet:liveness`: subscribe only while the detail page is open (plan 4.9). */
   useDeviceLiveness: (deviceId: Id) => QueryState<DeviceLiveness>;
   /** `fleet:watch` (viewer): the page calls it on open and every 4 minutes while visible. */

@@ -522,3 +522,350 @@ describe("fleet:list follow-ups (Step 17)", () => {
     expect(all.page.find((r) => r.name === "Placed")?.planState).toBe("ok");
   });
 });
+// UI pass 2026-11: the device page's queries (docs/plans/ui-pass/device-detail.md 6.1, 9).
+describe("device page queries", () => {
+  const OK = { mode: "audit", state: "ok" };
+  const LAYERS = { staff: OK, machine: OK, appLocker: OK, appControl: OK, procWatch: OK, boot: OK, performance: OK };
+
+  async function setup() {
+    const t = await setupAuth();
+    const orgId = await makeOrg(t);
+    const groupId = await t.run((ctx) => ctx.db.insert("groups", { orgId, name: "Floor", revision: 0, createdAt: 0 }));
+    const pc = await enrollDevice(t, orgId, { name: "Front desk", groupId });
+    const viewer = await asMember(t, { role: "viewer", orgId });
+    return { t, orgId, groupId, pc, viewer };
+  }
+  type Env = Awaited<ReturnType<typeof setup>>;
+
+  const mkApp = (e: Env, name: string, archived = false) =>
+    e.t.run((ctx) => ctx.db.insert("apps", { orgId: e.orgId, name, kind: "web", archived, revision: 0, createdAt: 0 }));
+  const assign = (e: Env, groupId: Id<"groups">, appId: Id<"apps">) =>
+    e.t.run((ctx) => ctx.db.insert("appAssignments", { orgId: e.orgId, groupId, appId, audience: "everyone", pinnedTaskbar: false, pinnedDesktop: false }));
+  const failedResult = (e: Env, appId: Id<"apps">, updatedAt: number, opts: { groupId?: Id<"groups">; deviceId?: Id<"devices">; state?: "failed" | "pending" } = {}) =>
+    e.t.run((ctx) =>
+      ctx.db.insert("installResults", {
+        orgId: e.orgId,
+        deviceId: opts.deviceId ?? e.pc.deviceId,
+        appId,
+        state: opts.state ?? "failed",
+        appRevision: 1,
+        attempts: 1,
+        updatedAt,
+        ...("groupId" in opts ? (opts.groupId === undefined ? {} : { groupId: opts.groupId }) : { groupId: e.groupId }),
+      }),
+    );
+  const insertApply = (e: Env, extra: { state?: "applied" | "refused"; wifi?: { profileId: string; revision: number; state: string; detail?: string }[]; printers?: { printerId: string; revision: number; state: string; detail?: string }[] } = {}) =>
+    e.t.run((ctx) =>
+      ctx.db.insert("deviceApplyReports", {
+        orgId: e.orgId,
+        deviceId: e.pc.deviceId,
+        appliedVersion: 3,
+        config: { groupId: e.groupId, version: 2, ring: "everyone" },
+        state: extra.state ?? "applied",
+        refusal: extra.state === "refused" ? "would_block_exit" : undefined,
+        layers: { ...LAYERS, machine: { mode: "on", state: "partial", detail: "admin_signin_unverified" } },
+        wifi: extra.wifi ?? [],
+        printers: extra.printers ?? [],
+        lkgVersion: 2,
+        capabilities: ["lockdown/1"],
+        contentHash: "a".repeat(64),
+        updatedAt: 1_700_000_000_000,
+      }),
+    );
+
+  test("fleet:page carries the header, report, head, lock, usb, protection and apply fields, like fleet:get", async () => {
+    const e = await setup();
+    const { t, pc, viewer } = e;
+    // Enrollment writes the first (agent version only) report: no lockdown capability yet, nothing else.
+    expect(await viewer.as.query(api.fleet.page, { deviceId: pc.deviceId })).toMatchObject({
+      name: "Front desk",
+      revoked: false,
+      group: { name: "Floor" },
+      kioskEnabled: true,
+      displayMode: "auto",
+      groupDisplayMode: "auto",
+      outOfSupport: false,
+      report: { agentVersion: "0.4.0" },
+      latestVersion: null,
+      planState: null,
+      flags: { noGroup: false, revoked: false, rotateCredential: false },
+      lock: null,
+      ring: "everyone",
+      usbAllowUntil: null,
+      protection: null,
+      lockdownCapable: false,
+      apply: null,
+      failedInstalls: { count: 0, more: false, names: [] },
+      network: { wifiFailed: 0, printersFailed: 0 },
+    });
+
+    await t.mutation(api.deviceApi.report, {
+      deviceId: pc.deviceId,
+      deviceSecret: pc.secret,
+      status: { agentVersion: "0.4.0", osBuild: "26100.1", osEdition: "Professional", diskFreeGb: 12, restartPending: true, compat: { blockers: [] } },
+    });
+    await t.mutation(internal.publish.run, { orgId: e.orgId });
+    const a = await admin(t, e.orgId);
+    await a.as.mutation(api.fleet.lock, { deviceId: pc.deviceId, message: "Back in 5 minutes" });
+    await a.as.mutation(api.fleet.allowUsb, { deviceId: pc.deviceId, hours: 1 });
+    await insertApply(e);
+    await t.run(async (ctx) => {
+      const report = (await ctx.db.query("deviceReports").withIndex("by_device", (q) => q.eq("deviceId", pc.deviceId)).unique())!;
+      await ctx.db.patch(report._id, { security: { secureBoot: "on", bitLocker: "off" }, capabilities: ["lockdown/1"] });
+    });
+
+    const p = await viewer.as.query(api.fleet.page, { deviceId: pc.deviceId });
+    const g = await viewer.as.query(api.fleet.get, { deviceId: pc.deviceId });
+    expect(p.latestVersion).toBeGreaterThan(0);
+    expect(p.planState).toBe("ok");
+    expect(p.report).toMatchObject({ osEdition: "Professional", diskFreeGb: 12, restartPending: true });
+    expect(p.lock).toMatchObject({ message: "Back in 5 minutes" });
+    expect(p.usbAllowUntil).not.toBeNull();
+    expect(p.lockdownCapable).toBe(true);
+    expect(p.apply).toMatchObject({ state: "applied", appliedVersion: 3, lkgVersion: 2, configVersion: 2 });
+    expect(p.apply?.layers.machine).toEqual({ mode: "on", state: "partial", detail: "admin_signin_unverified" });
+    // The shared fields are the same as `fleet:get` answers (the page is its replacement).
+    for (const k of ["_id", "name", "revision", "kioskEnabled", "enrolledAt", "group", "presence", "report", "flags", "lock", "ring", "usbAllowUntil", "protection", "lockdownCapable", "apply", "displayMode", "groupDisplayMode"] as const) {
+      expect(p[k], k).toEqual(g[k]);
+    }
+    expect("groups" in p || "versions" in p || "rolloutRevision" in p).toBe(false);
+    expectNoSecrets(p, [sha256HexSync(pc.secret)]);
+
+    await t.run(async (ctx) => {
+      const head = (await ctx.db.query("desiredHeads").withIndex("by_device", (q) => q.eq("deviceId", pc.deviceId)).unique())!;
+      await ctx.db.patch(head._id, { planState: "suspended" });
+    });
+    expect((await viewer.as.query(api.fleet.page, { deviceId: pc.deviceId })).planState).toBe("suspended");
+  });
+
+  test("a PC without a group: noGroup flag, no group, nothing counted", async () => {
+    const e = await setup();
+    const loose = await enrollDevice(e.t, e.orgId, { name: "Loose" });
+    const p = await e.viewer.as.query(api.fleet.page, { deviceId: loose.deviceId });
+    expect(p).toMatchObject({ group: null, groupDisplayMode: "auto", flags: { noGroup: true }, failedInstalls: { count: 0, more: false, names: [] } });
+  });
+
+  test("a revoked PC: revoked flag, rotation flag, no failed installs", async () => {
+    const e = await setup();
+    const a = await admin(e.t, e.orgId);
+    const app = await mkApp(e, "Docs");
+    await assign(e, e.groupId, app);
+    await failedResult(e, app, 5);
+    expect((await e.viewer.as.query(api.fleet.page, { deviceId: e.pc.deviceId })).failedInstalls.count).toBe(1);
+    await a.as.mutation(api.fleet.requestCredentialRotation, { deviceId: e.pc.deviceId });
+    expect((await e.viewer.as.query(api.fleet.page, { deviceId: e.pc.deviceId })).flags.rotateCredential).toBe(true);
+    await a.as.mutation(api.fleet.revoke, { deviceId: e.pc.deviceId });
+    expect(await e.viewer.as.query(api.fleet.page, { deviceId: e.pc.deviceId })).toMatchObject({
+      revoked: true,
+      flags: { revoked: true, noGroup: false },
+      presence: { online: false, revoked: true },
+      failedInstalls: { count: 0, more: false, names: [] },
+    });
+  });
+
+  test("failed installs count only results that still count; names <= 2 newest first", async () => {
+    const e = await setup();
+    const back = await e.t.run((ctx) => ctx.db.insert("groups", { orgId: e.orgId, name: "Back", revision: 0, createdAt: 0 }));
+    const second = await enrollDevice(e.t, e.orgId, { name: "Second", groupId: e.groupId });
+    const live = await mkApp(e, "Zoom");
+    const alsoLive = await mkApp(e, "Teams");
+    const unassigned = await mkApp(e, "Unassigned");
+    const archived = await mkApp(e, "Archived", true);
+    const otherGroup = await mkApp(e, "Elsewhere");
+    const untagged = await mkApp(e, "Untagged");
+    const pending = await mkApp(e, "Pending");
+    const third = await mkApp(e, "Third live");
+    for (const app of [live, alsoLive, archived, untagged, pending, third]) await assign(e, e.groupId, app);
+    await assign(e, back, otherGroup);
+    await failedResult(e, live, 10);
+    await failedResult(e, alsoLive, 20);
+    await failedResult(e, third, 30);
+    await failedResult(e, unassigned, 40);
+    await failedResult(e, archived, 50);
+    await failedResult(e, otherGroup, 60, { groupId: back }); // tagged with a group the PC is not in
+    await failedResult(e, untagged, 70, { groupId: undefined }); // written before the tag existed
+    await failedResult(e, pending, 80, { state: "pending" });
+    await failedResult(e, live, 90, { deviceId: second.deviceId }); // another PC's failure
+
+    const p = await e.viewer.as.query(api.fleet.page, { deviceId: e.pc.deviceId });
+    expect(p.failedInstalls).toEqual({ count: 3, more: false, names: ["Third live", "Teams"] });
+    expect((await e.viewer.as.query(api.fleet.page, { deviceId: second.deviceId })).failedInstalls).toEqual({ count: 1, more: false, names: ["Zoom"] });
+  });
+
+  test("failed installs: the range is 10 newest, `more` says it was full; a full page stays within its budget", async () => {
+    const e = await setup();
+    for (let i = 0; i < 12; i++) {
+      const app = await mkApp(e, `App ${i}`);
+      await assign(e, e.groupId, app);
+      await failedResult(e, app, 100 + i);
+    }
+    const { result, io } = await probe(() => e.viewer.as.query(api.fleet.page, { deviceId: e.pc.deviceId }));
+    expect(result.failedInstalls).toEqual({ count: 10, more: true, names: ["App 11", "App 10"] });
+    expect(io.reads).toBeLessThanOrEqual(44);
+    expect(io.readBytes).toBeLessThanOrEqual(64_000);
+    for (const table of ["deviceLiveness", "desiredBodies", "desiredStates", "groups"]) expect(io.tables.has(table), table).toBe(table === "groups");
+  });
+
+  test("network counts come from the apply report's failed Wi-Fi and printer items", async () => {
+    const e = await setup();
+    await insertApply(e, {
+      wifi: [
+        { profileId: "w1", revision: 1, state: "failed", detail: "connect_failed" },
+        { profileId: "w2", revision: 1, state: "applied" },
+        { profileId: "w3", revision: 1, state: "failed" },
+        { profileId: "w4", revision: 1, state: "unsupported" },
+      ],
+      printers: [
+        { printerId: "p1", revision: 1, state: "failed" },
+        { printerId: "p2", revision: 1, state: "applying" },
+      ],
+    });
+    expect((await e.viewer.as.query(api.fleet.page, { deviceId: e.pc.deviceId })).network).toEqual({ wifiFailed: 2, printersFailed: 1 });
+  });
+
+  test("fleet:deviceSettings: the organization's groups by name and the group's rollout revision (0 without a row or a group)", async () => {
+    const e = await setup();
+    await e.t.run(async (ctx) => {
+      await ctx.db.insert("groups", { orgId: e.orgId, name: "Back office", revision: 0, createdAt: 1 });
+      await ctx.db.insert("groups", { orgId: e.orgId, name: "Admin", revision: 0, createdAt: 2 });
+    });
+    const foreign = await group(e.t, await makeOrg(e.t, "Other"), "Foreign group");
+    const loose = await enrollDevice(e.t, e.orgId, { name: "Loose" });
+
+    const first = await e.viewer.as.query(api.fleet.deviceSettings, { deviceId: e.pc.deviceId });
+    expect(first.groups.map((g) => g.name)).toEqual(["Admin", "Back office", "Floor"]);
+    expect(first.groups.map((g) => g._id)).not.toContain(foreign);
+    expect(first.rolloutRevision).toBe(0);
+    await e.t.run((ctx) =>
+      ctx.db.insert("groupRollouts", {
+        orgId: e.orgId,
+        groupId: e.groupId,
+        enabled: false,
+        pointers: { pilot: 1, early: 1, everyone: 1 },
+        autoPromote: { enabled: false, bakeHours: 24, maxFailurePct: 10 },
+        autoRollback: true,
+        state: "idle",
+        revision: 3,
+      }),
+    );
+    expect((await e.viewer.as.query(api.fleet.deviceSettings, { deviceId: e.pc.deviceId })).rolloutRevision).toBe(3);
+    expect((await e.viewer.as.query(api.fleet.deviceSettings, { deviceId: loose.deviceId })).rolloutRevision).toBe(0);
+  });
+
+  test("fleet:versions: the newest 5 versions, newest first, only version, time and reason", async () => {
+    const e = await setup();
+    await e.t.run(async (ctx) => {
+      for (let version = 1; version <= 7; version++) {
+        const bodyId = await ctx.db.insert("desiredBodies", { orgId: e.orgId, deviceId: e.pc.deviceId, version, payload: "{}", signature: "s", keyId: "k", contentHash: "h", createdAt: version });
+        await ctx.db.insert("desiredVersions", { orgId: e.orgId, deviceId: e.pc.deviceId, version, reason: `Change ${version}`, createdAt: 1_000 + version, bodyId });
+      }
+    });
+    const rows = await e.viewer.as.query(api.fleet.versions, { deviceId: e.pc.deviceId });
+    expect(rows).toEqual([7, 6, 5, 4, 3].map((version) => ({ version, createdAt: 1_000 + version, reason: `Change ${version}` })));
+    const none = await enrollDevice(e.t, e.orgId, { name: "New" });
+    expect(await e.viewer.as.query(api.fleet.versions, { deviceId: none.deviceId })).toEqual([]);
+  });
+
+  test("fleet:network keeps the group's items, maps their states, and never returns a passphrase, address, URL or hash", async () => {
+    const e = await setup();
+    const other = await group(e.t, e.orgId, "Other group");
+    const SECRET_BOX = "SEALED-PASSPHRASE-BOX";
+    const wifi = (name: string, groupIds: Id<"groups">[]) =>
+      e.t.run((ctx) =>
+        ctx.db.insert("wifiProfiles", {
+          orgId: e.orgId,
+          name,
+          ssid: `${name}-ssid`,
+          hidden: false,
+          security: "wpa2Personal",
+          autoConnect: true,
+          passphrase: { keyId: "k1", sealed: SECRET_BOX },
+          groupIds,
+          revision: 1,
+          createdAt: 0,
+        }),
+      );
+    const printer = (name: string, groupIds: Id<"groups">[], defaultForGroupIds: Id<"groups">[] = []) =>
+      e.t.run((ctx) =>
+        ctx.db.insert("printers", { orgId: e.orgId, name, kind: "raw", address: "10.9.8.7", driver: "Generic / Text Only", groupIds, defaultForGroupIds, revision: 1, createdAt: 0 }),
+      );
+    const driver = (name: string, groupIds: Id<"groups">[]) =>
+      e.t.run((ctx) =>
+        ctx.db.insert("drivers", {
+          orgId: e.orgId,
+          name,
+          kind: "inf",
+          deviceClass: "printer",
+          url: "https://downloads.example.test/driver.zip",
+          sha256: "9".repeat(64),
+          sizeBytes: 10,
+          inf: "x.inf",
+          silentArgs: [],
+          successExitCodes: [],
+          provides: [],
+          groupIds,
+          revision: 1,
+          createdAt: 0,
+        }),
+      );
+    const shop = await wifi("Shop floor", [e.groupId]);
+    const guest = await wifi("Guest", [e.groupId, other]);
+    const notMine = await wifi("Other group only", [other]);
+    const waitingWifi = await wifi("Not reported yet", [e.groupId]);
+    const lobby = await printer("Lobby", [e.groupId], [e.groupId]);
+    const labels = await printer("Labels", [e.groupId]);
+    await printer("Elsewhere", [other]);
+    const scanner = await driver("Scanner pack", [e.groupId]);
+    const waitingDriver = await driver("Not sent yet", [e.groupId]);
+    await driver("Other group driver", [other]);
+    await e.t.run((ctx) => ctx.db.insert("driverResults", { orgId: e.orgId, deviceId: e.pc.deviceId, driverId: scanner, state: "failed", driverRevision: 1, attempts: 2, detail: "exit_code_1", groupId: e.groupId, updatedAt: 1 }));
+    await insertApply(e, {
+      wifi: [
+        { profileId: shop, revision: 1, state: "failed", detail: "connect_failed" },
+        { profileId: guest, revision: 1, state: "applied" },
+        { profileId: notMine, revision: 1, state: "applied" },
+      ],
+      printers: [
+        { printerId: lobby, revision: 1, state: "applied" },
+        { printerId: labels, revision: 1, state: "unsupported" },
+      ],
+    });
+
+    const n = await e.viewer.as.query(api.fleet.network, { deviceId: e.pc.deviceId });
+    expect(n.groupId).toBe(e.groupId);
+    expect(n.reportedAt).toBe(1_700_000_000_000);
+    const byName = <T extends { name: string }>(rows: T[]) => Object.fromEntries(rows.map((r) => [r.name, r]));
+    expect(Object.keys(byName(n.wifi)).sort()).toEqual(["Guest", "Not reported yet", "Shop floor"]);
+    expect(byName(n.wifi)["Shop floor"]).toMatchObject({ _id: shop, state: "failed", detail: "connect_failed" });
+    expect(byName(n.wifi)["Guest"]).toMatchObject({ state: "working", detail: null });
+    expect(byName(n.wifi)["Not reported yet"]).toMatchObject({ _id: waitingWifi, state: "waiting", detail: null });
+    expect(Object.keys(byName(n.printers)).sort()).toEqual(["Labels", "Lobby"]);
+    expect(byName(n.printers)["Lobby"]).toMatchObject({ isDefault: true, state: "working" });
+    expect(byName(n.printers)["Labels"]).toMatchObject({ isDefault: false, state: "notSupported" });
+    expect(Object.keys(byName(n.drivers)).sort()).toEqual(["Not sent yet", "Scanner pack"]);
+    expect(byName(n.drivers)["Scanner pack"]).toMatchObject({ state: "failed", detail: "exit_code_1" });
+    expect(byName(n.drivers)["Not sent yet"]).toMatchObject({ _id: waitingDriver, state: "pending", detail: null });
+    const text = JSON.stringify(n);
+    for (const s of [SECRET_BOX, "-ssid", "10.9.8.7", "downloads.example.test", "9".repeat(64), "Generic / Text Only"]) expect(text.includes(s), s).toBe(false);
+    expectNoSecrets(n, [sha256HexSync(e.pc.secret)]);
+  });
+
+  test("fleet:network: a PC without a group or a report has nothing yet", async () => {
+    const e = await setup();
+    await e.t.run((ctx) => ctx.db.insert("wifiProfiles", { orgId: e.orgId, name: "W", ssid: "W", hidden: false, security: "open", autoConnect: true, groupIds: [e.groupId], revision: 1, createdAt: 0 }));
+    const loose = await enrollDevice(e.t, e.orgId, { name: "Loose" });
+    expect(await e.viewer.as.query(api.fleet.network, { deviceId: loose.deviceId })).toEqual({ groupId: null, reportedAt: null, wifi: [], printers: [], drivers: [] });
+    const n = await e.viewer.as.query(api.fleet.network, { deviceId: e.pc.deviceId });
+    expect(n.reportedAt).toBeNull();
+    expect(n.wifi.map((w) => [w.name, w.state])).toEqual([["W", "waiting"]]);
+  });
+
+  test("a foreign or unknown device id answers not_found for every device page query", async () => {
+    const e = await setup();
+    const theirs = await enrollDevice(e.t, await makeOrg(e.t, "B"));
+    for (const q of [api.fleet.page, api.fleet.deviceSettings, api.fleet.versions, api.fleet.network]) {
+      await expectCode(e.viewer.as.query(q, { deviceId: theirs.deviceId }), "not_found");
+      await expectCode(e.viewer.as.query(q, { deviceId: "not-an-id" }), "not_found");
+    }
+  });
+});

@@ -1,5 +1,5 @@
 import type { ListQuery, ServerList } from "../serverList";
-import type { DeviceInstallRow, DeviceRow, Id } from "../types";
+import type { DeviceInstallRow, DeviceNetwork, DeviceRow, DeviceSettingsOptions, DocVersion, Id, QueryState } from "../types";
 
 /** The filter of `fleet:list` / `fleet:count`: a real group id or "none" (PCs without a group). */
 export interface DevicesFilter {
@@ -25,4 +25,18 @@ export interface DevicesApi {
   useDevicesScreen: (query: ListQuery & { groupId?: string }) => ServerList<DeviceRow>;
   /** `fleet:installs`: install results of one PC, sort key `updated` only, no total. */
   useDeviceInstalls: (deviceId: Id, query: ListQuery) => ServerList<DeviceInstallRow>;
+  /**
+   * The device page's per-tab queries (UI pass 2026-11): each is subscribed only while its tab (or disclosure) is open, so a tab
+   * that is not open loads nothing. `not_found` for a foreign or unknown id.
+   *
+   * `fleet:deviceSettings` (Settings tab): the group picker's groups (sorted, at most 500) and the group's rollout revision.
+   */
+  useDeviceSettingsOptions: (deviceId: Id) => QueryState<DeviceSettingsOptions>;
+  /**
+   * `fleet:versions` (Activity tab, "Settings versions" disclosure): the last 5 versions of the PC's settings, newest first.
+   * With `enabled: false` it subscribes to nothing and stays `loading`.
+   */
+  useDeviceVersions: (deviceId: Id, enabled: boolean) => QueryState<DocVersion[]>;
+  /** `fleet:network` (Network tab): the Wi-Fi networks, printers and drivers of the PC's group with their state on this PC. */
+  useDeviceNetwork: (deviceId: Id) => QueryState<DeviceNetwork>;
 }

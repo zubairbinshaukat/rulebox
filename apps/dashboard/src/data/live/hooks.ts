@@ -27,7 +27,7 @@ import { listArgs, type ServerList } from "../serverList";
 import { useMappedList } from "./mapList";
 import { useServerPage } from "./serverList";
 import { appDetailOf, installCountsOf, NEW_APP } from "./apps";
-import { deviceDetailOf } from "./devices";
+import { deviceDetailOf, devicePageOf } from "./devices";
 import { employeeDetailOf, newEmployeeOf } from "./employees";
 import { mapError, useMapped, useMappedState, useMemberQuery } from "./convex";
 
@@ -166,6 +166,9 @@ export const liveApi: DataApi = {
   // (the dialog opens and the call is retried once), the others an unlocked session.
   useDeviceDetail(deviceId) {
     return useMappedState(useMemberQuery(api.fleet.get, { deviceId }), deviceDetailOf);
+  },
+  useDevicePage(deviceId) {
+    return useMappedState(useMemberQuery(api.fleet.page, { deviceId }), devicePageOf);
   },
   useDeviceLiveness(deviceId) {
     return useMemberQuery(api.fleet.liveness, { deviceId });

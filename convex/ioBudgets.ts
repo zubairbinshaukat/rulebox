@@ -143,7 +143,23 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // Step 8: + the last 5 version rows (~150 B each).
   // Step 15: + the PC's lock (<= 1).
   // Step 19: + the PC's apply report (1 row, ~2.5 KB, written only when its content changes) and its group's rollout row (the ring picker).
+  // DEPRECATED (UI pass 2026-11): replaced by fleet:page + the per-tab queries below; deleted one release later.
   "fleet:get": { maxReads: 3 + 5 + 50 + 5 + 1 + 2, maxReadBytes: 50_176 + 1_024 + 6_144, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // UI pass 2026-11 (device page, docs/plans/ui-pass/device-detail.md 6.1). The header, Overview and Protection tab, subscribed for the whole
+  // page: wrapper 3, device, credentials, presence, summary, report (compat <= 32 KB), head (~250 B), apply report (~2.5 KB), lock, the PC's
+  // group (db.get, never the group list), then the newest 10 failed results of the PC (`installResults.by_device_state_updated`) with <= 10 apps
+  // and <= 10 assignment lookups (`liveChecker`, memoized). Worst case 3 + 9 + 30 = 42 reads / ~60 KB. Never liveness or a body.
+  // MEASURED (large-org fixture, no failed installs): 9 reads / 2.3 KB; (fleet.test.ts, 10 live failed results, web apps): 38 reads / 9.5 KB.
+  "fleet:page": { maxReads: 44, maxReadBytes: 64_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Settings tab (subscribed only while it is open): wrapper 3, device, groups.by_org <= 500 (the picker's options), the group's rollout row.
+  // Worst case 3 + 1 + 500 + 1 = 505 reads / ~150 KB (500 groups is the cap; a typical organization has < 20).
+  // MEASURED (large-org fixture, 10 groups): 14 reads / 2.6 KB.
+  "fleet:deviceSettings": { maxReads: 505, maxReadBytes: 160_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Activity tab's "Settings versions" disclosure (subscribed only while it is open): wrapper 3, device, the newest 5 version rows (~150 B). MEASURED: 4 reads / 1 KB (no versions on the fixture PC).
+  "fleet:versions": { maxReads: 9, maxReadBytes: 4_096, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // Network tab (subscribed only while it is open): wrapper 3, device, apply report, wifiProfiles <= 51, printers <= 101, drivers <= 51,
+  // driver results of the PC <= 51. Worst case 3 + 2 + 254 = 259 reads / ~140 KB; typical < 20. MEASURED (large-org fixture): 6 reads / 1.9 KB.
+  "fleet:network": { maxReads: 260, maxReadBytes: 150_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // Step 19 "Allow USB for this PC": device, credentials, publishQueue (+ step-up row); writes: device, queue, audit. Nothing to end: 0 writes.
   "fleet:allowUsb": { maxReads: 9, maxReadBytes: 6_144, maxWrites: 3, maxWriteBytes: 2_048 },
   // Step 15 (plan 4.17): device, credentials, the old lock, publishQueue (+ step-up row); writes: old lock deleted, new lock, its `lockId` patch,

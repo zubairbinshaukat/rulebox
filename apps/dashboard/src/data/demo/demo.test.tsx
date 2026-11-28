@@ -855,3 +855,70 @@ describe("demo rollout rings and rollback (Phase 5 Step 16)", () => {
     expect(mine[0]!.ring).toBeUndefined();
   }, 15_000);
 });
+
+describe("demo device page queries (UI pass 2026-11)", () => {
+  const byName = (name: string) => db().devices.find((d) => d.name === name)!;
+
+  it("useDevicePage is the header, Overview and Protection data of one PC: report, head, lock, lockdown fields, failed installs, network counts", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const scanner = byName("OFFICE-SCANNER");
+    const page = (await ready(renderHook(() => demoApi.useDevicePage(scanner._id)).result)).data;
+    expect(page).toMatchObject({
+      name: "OFFICE-SCANNER",
+      revoked: false,
+      outOfSupport: true,
+      group: { name: "Back office" },
+      planState: "ok",
+      report: { kioskError: "desired_state_untrusted", trustedKeyIds: [] },
+      network: { wifiFailed: 1, printersFailed: 0 },
+      ring: "everyone",
+    });
+    expect(page.latestVersion).toBeGreaterThan(0);
+    expect(page.protection).toMatchObject({ secureBoot: "off" });
+    expect(page.apply?.state).toBe("partial");
+    expect("groups" in page || "versions" in page || "rolloutRevision" in page).toBe(false);
+
+    // A failed install of an app the PC's group assigns counts (OFFICE-MANAGER's failed label app is not assigned to its group: it does not); a revoked PC counts nothing.
+    expect(page.failedInstalls).toEqual({ count: 1, more: false, names: ["VLC media player"] });
+    expect((await ready(renderHook(() => demoApi.useDevicePage(byName("OFFICE-MANAGER")._id)).result)).data.failedInstalls.count).toBe(0);
+    const stolen = byName("STOLEN-TABLET");
+    expect((await ready(renderHook(() => demoApi.useDevicePage(stolen._id)).result)).data).toMatchObject({ revoked: true, failedInstalls: { count: 0, more: false, names: [] } });
+    expect((await ready(renderHook(() => demoApi.useDevicePage(byName("WAREHOUSE-01")._id)).result)).data.planState).toBe("overLimit");
+  });
+
+  it("one PC shows the hideAdminTiles warning: its machine layer is partial with admin_signin_unverified", () => {
+    resetDemo();
+    const rows = [...db().applyDetails.entries()].filter(([, a]) => a.layers.machine.detail === "admin_signin_unverified");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]![1]).toMatchObject({ state: "partial", layers: { machine: { mode: "on", state: "partial" } } });
+  });
+
+  it("settings options, versions and the network tab answer for their PC; the closed versions disclosure loads nothing", async () => {
+    resetDemo();
+    signInAs("owner@demo.rulebox.test");
+    const counter = byName("COUNTER-02");
+    const settings = (await ready(renderHook(() => demoDevicesApi.useDeviceSettingsOptions(counter._id)).result)).data;
+    expect(settings.groups.map((g) => g.name)).toEqual([...settings.groups.map((g) => g.name)].sort((a, b) => a.localeCompare(b)));
+    expect(settings.rolloutRevision).toBe(3);
+    const versions = (await ready(renderHook(() => demoDevicesApi.useDeviceVersions(counter._id, true)).result)).data;
+    expect(versions.length).toBeGreaterThan(0);
+    expect(versions.length).toBeLessThanOrEqual(5);
+    const closed = renderHook(() => demoDevicesApi.useDeviceVersions(counter._id, false)).result;
+    await new Promise((r) => setTimeout(r, 300));
+    expect(closed.current.status).toBe("loading");
+
+    const net = (await ready(renderHook(() => demoDevicesApi.useDeviceNetwork(counter._id)).result)).data;
+    expect(net.wifi).toMatchObject([{ name: "Shop floor", state: "working", detail: null }]);
+    expect(net.printers.map((p) => [p.name, p.state])).toEqual([
+      ["Front desk", "working"],
+      ["Warehouse label printer", "waiting"],
+    ]);
+    expect(net.drivers).toMatchObject([{ name: "Brother laser printer driver", state: "installed" }]);
+    const scanner = (await ready(renderHook(() => demoDevicesApi.useDeviceNetwork(byName("OFFICE-SCANNER")._id)).result)).data;
+    expect(scanner.wifi[0]).toMatchObject({ name: "Back office (hidden)", state: "failed", detail: "connect_failed" });
+    expect(scanner.drivers[0]).toMatchObject({ state: "failed", detail: "hash_mismatch" });
+    // A PC without a group has nothing.
+    expect((await ready(renderHook(() => demoDevicesApi.useDeviceNetwork(byName("SPARE-LAPTOP-07")._id)).result)).data).toMatchObject({ groupId: null, wifi: [], printers: [], drivers: [] });
+  });
+});

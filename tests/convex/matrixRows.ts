@@ -603,6 +603,11 @@ export const ROWS: Row[] = [
     expect: { ...VIEWER, foreign: "ok" }, // the foreign owner lists THEIR devices
   },
   { name: "fleet:get", call: (a, f) => a.query(api.fleet.get, { deviceId: f.deviceId }), expect: { ...VIEWER, foreign: "not_found" } },
+  // UI pass 2026-11: the device page's queries (docs/plans/ui-pass/device-detail.md 6.1).
+  { name: "fleet:page", call: (a, f) => a.query(api.fleet.page, { deviceId: f.deviceId }), expect: { ...VIEWER, foreign: "not_found" } },
+  { name: "fleet:deviceSettings", call: (a, f) => a.query(api.fleet.deviceSettings, { deviceId: f.deviceId }), expect: { ...VIEWER, foreign: "not_found" } },
+  { name: "fleet:versions", call: (a, f) => a.query(api.fleet.versions, { deviceId: f.deviceId }), expect: { ...VIEWER, foreign: "not_found" } },
+  { name: "fleet:network", call: (a, f) => a.query(api.fleet.network, { deviceId: f.deviceId }), expect: { ...VIEWER, foreign: "not_found" } },
   {
     name: "fleet:rename",
     // Unchanged name: no write, every allowed caller gets the same answer.

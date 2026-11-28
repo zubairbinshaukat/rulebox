@@ -841,6 +841,8 @@ export default defineSchema({
     // "Newest first" means newest `updatedAt` (Step 17 review), not creation.
     .index("by_device_updated", ["deviceId", "updatedAt"])
     .index("by_device_app", ["deviceId", "appId"])
+    // UI pass 2026-11: the device page's failed-install count (`fleet:page`, newest failed results of one PC).
+    .index("by_device_state_updated", ["deviceId", "state", "updatedAt"])
     .index("by_app_state_updated", ["appId", "state", "updatedAt"])
     .index("by_org_state_updated", ["orgId", "state", "updatedAt"]),
 

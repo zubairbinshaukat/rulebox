@@ -41,6 +41,8 @@ import {
   type AssignmentRow,
   type AuditEntry,
   type BroadcastRow,
+  type DeviceNetwork,
+  type DevicePage,
   type DevicePresence,
   type DeviceRow,
   type EmployeeDetail,
@@ -52,6 +54,7 @@ import {
   type InstallSummary,
   type Me,
   type MeResult,
+  type NetworkItemState,
   type DriverCounts,
   type DriverDetail,
   type DriverRow,
@@ -70,7 +73,7 @@ import {
 import type { ServerList } from "../serverList";
 import { byKey, contains, relevance, useDemoServerPage } from "./lists";
 import { demoFeedStatus, demoUpdateFlag, resetDemoFeedOnEdit, useDemoApproveFeedUpdate, useDemoCheckFeedNow, useDemoDismissFeedUpdate, useDemoSetFeedPaused } from "./feeds";
-import { lockdownWarningsOf } from "./lockdown";
+import { deviceLockdownOf, lockdownWarningsOf } from "./lockdown";
 import * as validate from "../../lib/validate";
 import * as rules from "../../lib/apps/updateRules";
 import { prefillFor } from "@convex/lib/installerDetect";
@@ -294,6 +297,35 @@ function deviceRow(db: DemoDb, d: DbDevice): DeviceRow {
     latestVersion: latestVersion(db, d._id),
     planState: planState(db, d),
   };
+}
+
+/** How many of the newest failed results of a PC the page looks at (`FAILED_INSTALL_RANGE` in `convex/fleet.ts`). */
+const FAILED_INSTALL_RANGE = 10;
+
+/**
+ * `fleet:page`'s `failedInstalls`: the newest 10 failed results of the PC that still count (its group assigns the app, the app is
+ * not archived; none for a revoked PC or one without a group), `more` when the range was full, at most two app names.
+ */
+function failedInstallsOf(db: DemoDb, d: DbDevice): DevicePage["failedInstalls"] {
+  if (d.revoked || !d.groupId) return { count: 0, more: false, names: [] };
+  const assigned = new Set(db.assignments.filter((a) => a.groupId === d.groupId).map((a) => a.appId));
+  const rows = db.installs
+    .filter((i) => i.deviceId === d._id && i.state === "failed")
+    .sort(byKey((i) => i.updatedAt, "desc"))
+    .slice(0, FAILED_INSTALL_RANGE);
+  const apps = rows.flatMap((i) => {
+    const app = assigned.has(i.appId) ? db.apps.find((a) => a._id === i.appId) : undefined;
+    return app && !app.archived ? [app.name] : [];
+  });
+  return { count: apps.length, more: rows.length === FAILED_INSTALL_RANGE, names: apps.slice(0, 2) };
+}
+
+/** The buckets of `convex/fleet.ts` `networkStateOf`: applied / failed / unsupported, anything else is still waiting. */
+function networkStateOf(state: string | undefined): NetworkItemState {
+  if (state === "applied") return "working";
+  if (state === "failed") return "failed";
+  if (state === "unsupported") return "notSupported";
+  return "waiting";
 }
 
 /** The head's plan state: a suspended organization suspends every PC; otherwise what the fixture says (null = never published). */
@@ -787,6 +819,45 @@ export const demoApi: DataApi = {
         groups: groupOptions(db),
         displayMode: d.displayMode ?? "auto",
         groupDisplayMode: g?.displayMode ?? "auto",
+      };
+    });
+  },
+
+  // `fleet:page` (UI pass 2026-11): the header, Overview and Protection tab in one query; nothing else is subscribed for the page.
+  useDevicePage(deviceId) {
+    return useDemoQuery(`fleet:page:${deviceId}`, (db): DevicePage => {
+      requireReader();
+      const d = find(db.devices, deviceId);
+      const g = d.groupId ? db.groups.find((x) => x._id === d.groupId) : undefined;
+      const ld = deviceLockdownOf(db, d);
+      const report = db.reports.get(d._id) ?? null;
+      return {
+        _id: d._id,
+        name: d.name,
+        revision: d.revision,
+        revoked: d.revoked,
+        kioskEnabled: d.kioskEnabled,
+        enrolledAt: d.enrolledAt,
+        group: g ? { _id: g._id, name: g.name } : null,
+        displayMode: d.displayMode ?? "auto",
+        groupDisplayMode: g?.displayMode ?? "auto",
+        presence: devicePresence(db, d),
+        report,
+        outOfSupport: report?.outOfSupport === true,
+        latestVersion: latestVersion(db, d._id) ?? null,
+        planState: planState(db, d) ?? null,
+        flags: { noGroup: !d.groupId, revoked: d.revoked, rotateCredential: d.rotateCredential },
+        lock: db.locks.get(d._id) ?? null,
+        ring: ld.ring,
+        usbAllowUntil: ld.usbAllowUntil,
+        protection: ld.protection,
+        lockdownCapable: ld.lockdownCapable,
+        apply: ld.apply,
+        failedInstalls: failedInstallsOf(db, d),
+        network: {
+          wifiFailed: db.networkResults.get(d._id)?.wifi.filter((w) => networkStateOf(w.state) === "failed").length ?? 0,
+          printersFailed: db.networkResults.get(d._id)?.printers.filter((p) => networkStateOf(p.state) === "failed").length ?? 0,
+        },
       };
     });
   },
@@ -2825,6 +2896,62 @@ export const demoDevicesApi: DevicesApi = {
           installedVersion: i.installedVersion,
           updatedAt: i.updatedAt,
         }));
+    });
+  },
+
+  // The device page's per-tab queries (UI pass 2026-11).
+  useDeviceSettingsOptions(deviceId) {
+    return useDemoQuery(`fleet:deviceSettings:${deviceId}`, (db) => {
+      requireReader();
+      const d = find(db.devices, deviceId);
+      return { groups: groupOptions(db), rolloutRevision: (d.groupId ? db.rollouts.get(d.groupId)?.revision : undefined) ?? 0 };
+    });
+  },
+
+  useDeviceVersions(deviceId, enabled) {
+    const q = useDemoQuery(`fleet:versions:${deviceId}`, (db) => {
+      requireReader();
+      const d = find(db.devices, deviceId);
+      return (db.versions.get(d._id) ?? []).slice(0, 5).map((v) => ({ version: v.version, createdAt: v.createdAt, reason: v.reason }));
+    });
+    // Closed disclosure: nothing is subscribed (the live hook skips the query).
+    return enabled ? q : { status: "loading" };
+  },
+
+  useDeviceNetwork(deviceId) {
+    return useDemoQuery(`fleet:network:${deviceId}`, (db): DeviceNetwork => {
+      requireReader();
+      const d = find(db.devices, deviceId);
+      const groupId = d.groupId;
+      const reportedAt = db.applyDetails.get(d._id)?.updatedAt ?? null;
+      if (!groupId) return { groupId: null, reportedAt, wifi: [], printers: [], drivers: [] };
+      const r = db.networkResults.get(d._id);
+      const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name);
+      return {
+        groupId,
+        reportedAt,
+        wifi: db.wifi
+          .filter((w) => w.groupIds.includes(groupId))
+          .sort(byName)
+          .map((w) => {
+            const item = r?.wifi.find((x) => x.profileId === w._id);
+            return { _id: w._id, name: w.name, state: networkStateOf(item?.state), detail: item?.detail ?? null };
+          }),
+        printers: db.printers
+          .filter((p) => p.groupIds.includes(groupId))
+          .sort(byName)
+          .map((p) => {
+            const item = r?.printers.find((x) => x.printerId === p._id);
+            return { _id: p._id, name: p.name, isDefault: p.defaultForGroupIds.includes(groupId), state: networkStateOf(item?.state), detail: item?.detail ?? null };
+          }),
+        drivers: db.drivers
+          .filter((x) => x.groupIds.includes(groupId))
+          .sort(byName)
+          .map((x) => {
+            const item = r?.drivers.find((y) => y.driverId === x._id);
+            return { _id: x._id, name: x.name, state: item?.state ?? "pending", detail: item?.detail ?? null };
+          }),
+      };
     });
   },
 };
