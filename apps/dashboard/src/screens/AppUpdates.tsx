@@ -11,7 +11,7 @@ import { RelativeTime } from "../components/RelativeTime";
 import { RoleGate } from "../components/RoleGate";
 import { appUpdateStrings as s } from "../lib/screenStrings/appUpdates";
 import { useToast } from "../lib/toast";
-import type { FormApi, FormValues } from "./AppEdit";
+import type { FormApi, FormValues } from "./apps/appForm";
 
 /**
  * The "Updates" card of a Windows program (Phase 6 Step 10, plan 4.4): its version, the update mode with one line of help,

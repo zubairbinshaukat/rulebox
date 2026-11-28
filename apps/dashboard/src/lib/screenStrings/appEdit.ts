@@ -115,6 +115,21 @@ export const appEditStrings = {
   feedUrlBad: "The feed address must start with https://",
   feedKeyBad: "Paste the vendor's public key: letters, digits, + / and =.",
   feedTargetBad: "Lower-case letters, digits, - and _ only, like windows-x86_64-nsis.",
+  // ---- UI pass: the long hints move into (i) tips (`Field info`); the short `...Hint` lines above stay for the old form.
+  info: {
+    hue: "Used for the app's tile when it has no icon. It is picked for you.",
+    description: "Optional. Shown to you in the apps list.",
+    allowedDomains: "One site per line, like example.com. Every entry also includes everything under it. The address's own site is always allowed.",
+    wingetVersion: "Leave it alone to use the newest version.",
+    exe: "The program Rulebox starts when an employee opens the app. Use a folder like {ProgramFiles}\\Vendor\\App\\app.exe.",
+    args: "Optional, separated by spaces. Most apps need none.",
+    fileArg: "How the program is given a file to open, usually {file}. Empty if it can't open files.",
+    resetFolders: "One folder per line, like {LocalAppData}\\Vendor\\App. Cleared when an employee signs out. Leave empty to keep the app's data.",
+    productCode: "Lets Rulebox uninstall the app when it is taken away. Filled in from the catalogue when it has one.",
+    removeWhenUnassigned: "Rulebox uninstalls it from a PC when its group no longer has the app. EXE installers can't be uninstalled automatically, so the app is only hidden.",
+    sha256: "A fingerprint of the installer. Each PC refuses a file that does not match. It is filled in when Rulebox checks the file.",
+    installerUrl: "PCs download the installer from here. It must start with https://.",
+  },
   permissionNames: {
     camera: "Camera",
     microphone: "Microphone",

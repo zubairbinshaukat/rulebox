@@ -7,6 +7,8 @@ export const appsStrings = {
   add: "Add app",
   addWeb: "Website",
   addDesktop: "Windows program",
+  /** UI pass: the empty state points at the one "Add app" button. */
+  emptyBodyAdd: "Add a popular app, a website or your own installer, then give it to a group.",
   showArchived: "Show archived",
   active: "Active",
   colName: "App",
@@ -36,6 +38,14 @@ export const appsStrings = {
   updateFlagHint: {
     available: "A new version from the vendor's update feed is waiting for your approval.",
     feed_error: "The vendor's update feed has a problem. Open the app to see it.",
+  },
+  /** UI pass: where an app comes from, in plain words (the pill keeps the short names below). */
+  sourcesPlain: {
+    winget: "From the winget catalogue",
+    msi: "Installer link (MSI)",
+    exe: "Installer link (EXE)",
+    portable: "A single program file",
+    preinstalled: "Already on the PCs",
   },
   sources: {
     winget: "winget",

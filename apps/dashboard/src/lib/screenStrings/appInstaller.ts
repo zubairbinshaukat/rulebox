@@ -69,4 +69,20 @@ export const appInstallerStrings = {
   answerUrl: "Answer file address",
   answerUrlHint: "An https:// address ending in .iss, at most 256 KiB.",
   answerSha: "Answer file SHA-256",
+  // ---- UI pass: the "Install command" group inside Advanced. Labels keep their technical names; long hints are (i) texts.
+  advancedGroup: "Install command",
+  automatic: "Automatic",
+  useAutomatic: "Use automatic",
+  change: "Change",
+  info: {
+    silentArgs: "The switches the PC gives the installer so nothing is shown. Rulebox picks them from the installer type. A wrong switch makes the installer wait for a click; the PC stops it after the time below.",
+    tech: "What kind of installer this is. Rulebox finds it by reading the file.",
+    successCodes: "Numbers the installer returns when it worked. 0 always counts. Add 3010 or 1641 when a restart after the install is fine.",
+    timeout: "Minutes the installer may run, 5 to 120. Empty means 30. An installer that waits for a click is stopped after this time.",
+    publisher: "Optional. The PC refuses to run the installer unless it is signed by this name.",
+    answer: "A recorded set of answers for an InstallShield wizard. Record it once on a test PC, put the .iss file on an https:// address, and paste its address and SHA-256 here. Put {AnswerFile} in the switches where the file goes.",
+    productCode: "Lets Rulebox uninstall the app when it is taken away.",
+    fingerprint: "A fingerprint of the installer. Each PC refuses a file that does not match.",
+    wingetVersion: "Pick another version of this app than the newest.",
+  },
 } as const;

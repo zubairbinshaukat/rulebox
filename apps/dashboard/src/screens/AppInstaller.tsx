@@ -12,7 +12,7 @@ import { messageFor } from "../lib/errors";
 import { appInstallerStrings as s } from "../lib/screenStrings/appInstaller";
 import { prefillFrom, type PrefillKey } from "../lib/apps/installerPrefill";
 import * as v from "../lib/validate";
-import type { FormApi } from "./AppEdit";
+import type { FormApi } from "./apps/appForm";
 
 // The installer details of a Windows program (Phase 6 Step 13, plan 4.7): "Detect" and "Check a file on this computer" next to the
 // installer address, and the card with the technology, success codes, timeout, expected signer and answer file. One lazy chunk: most

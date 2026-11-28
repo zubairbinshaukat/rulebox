@@ -7,7 +7,7 @@ import { Field, FieldSet } from "../components/Field";
 import { InlineNotice } from "../components/Notice";
 import { SkeletonBlock } from "../components/Skeleton";
 import { appBrowserStrings as s } from "../lib/screenStrings/appBrowser";
-import type { FormApi } from "./AppEdit";
+import type { FormApi } from "./apps/appForm";
 
 /**
  * "Opens in" for a website (Phase 6 Step 16, plan 4.9.1): the Rulebox window, Edge, or Chrome with the Chrome program it uses. Under it,
