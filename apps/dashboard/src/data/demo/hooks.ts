@@ -48,6 +48,8 @@ import {
   type EmployeeDetail,
   type EmployeeRow,
   type EnrollmentCodeRow,
+  type EnrollmentPc,
+  type EnrollmentProgress,
   type GroupOption,
   type InstallCounts,
   type InstallState,
@@ -73,6 +75,7 @@ import {
 import type { ServerList } from "../serverList";
 import { byKey, contains, relevance, useDemoServerPage } from "./lists";
 import { demoFeedStatus, demoUpdateFlag, resetDemoFeedOnEdit, useDemoApproveFeedUpdate, useDemoCheckFeedNow, useDemoDismissFeedUpdate, useDemoSetFeedPaused } from "./feeds";
+import { simulatedPcIds, simulatePcFor, stopSimulation } from "./enrollmentSim";
 import { deviceLockdownOf, lockdownWarningsOf } from "./lockdown";
 import * as validate from "../../lib/validate";
 import * as rules from "../../lib/apps/updateRules";
@@ -2296,6 +2299,46 @@ export const demoApi: DataApi = {
     );
   },
 
+  /**
+   * The demo twin of `wifi:createWithPassphrase`: the checks of `saveWifi` (name, SSID, groups, 50 networks) and `setPassphrase`
+   * (the password), then ONE store change: a secured network that already has its password, revision 2, two audit rows as on the
+   * server. The text is checked and dropped: only the fact that a password is set is kept.
+   */
+  useCreateWifiWithPassphrase() {
+    return useCallback(
+      (input) =>
+        runMutation("admin", ({ db, audit, now }) => {
+          const name = nameOrFail(input.name, MAX_WIFI_NAME);
+          if (ssidProblem(input.ssid) !== null) fail("invalid_argument", { field: "ssid" });
+          if (input.security === "open") fail("invalid_argument", { field: "security", detail: "open" });
+          if (!WIFI_SECURITIES.includes(input.security)) fail("invalid_argument", { field: "security" });
+          if (input.groupIds.length > MAX_WIFI_GROUPS) fail("invalid_argument", { field: "groupIds", detail: "too_many" });
+          const problem = passphraseProblem(input.passphrase);
+          if (problem !== null) fail("invalid_argument", { field: "passphrase", detail: problem === "chars" ? "characters" : "length" });
+          if (db.wifi.length >= MAX_WIFI_PROFILES) fail("too_large", { detail: "wifi" });
+          const groupIds = [...new Set(input.groupIds)];
+          for (const g of groupIds) if (!db.groups.some((x) => x._id === g)) fail("not_found");
+          const row: DbWifi = {
+            _id: newId("wifi"),
+            name,
+            ssid: input.ssid,
+            hidden: input.hidden,
+            security: input.security,
+            autoConnect: input.autoConnect,
+            hasPassphrase: true,
+            passphraseSetAt: now,
+            groupIds,
+            revision: 2,
+          };
+          db.wifi.push(row);
+          audit({ action: "wifi.created", targetType: "wifi", targetId: row._id, targetLabel: name, summary: `Added the Wi-Fi network ${name}` });
+          audit({ action: "wifi.passphraseSet", targetType: "wifi", targetId: row._id, targetLabel: name, summary: `Replaced the password of ${name}` });
+          return { id: row._id, revision: row.revision };
+        }),
+      [],
+    );
+  },
+
   // ---- printers (Phase 5 Step 14). The demo twin of `networks:printerDetail` / `savePrinter` / `deletePrinter`.
   usePrinterDetail(id) {
     return useDemoQuery(`networks:printerDetail:${id}`, (db): PrinterDetail => {
@@ -2959,6 +3002,9 @@ export const demoDevicesApi: DevicesApi = {
   },
 };
 
+/** What the demo's "Download Rulebox" opens when the demo organization has set no release (a made-up build; the address does not exist). */
+const DEMO_DOWNLOAD = { version: "0.1.0", url: "https://example.invalid/Rulebox-0.1.0-x64.msi", sizeBytes: 31_000_000 } as const;
+
 /** Enrollment codes: their own seam (`data/enrollment`), re-exported by `data/enrollment/demo.ts`. */
 export const demoEnrollmentApi: EnrollmentApi = {
   useEnrollmentScreen(nowMinute, query) {
@@ -3004,10 +3050,48 @@ export const demoEnrollmentApi: EnrollmentApi = {
           db.tokens.push({ _id: id, label: label?.trim() || undefined, groupId, usesLeft: uses, usesTotal: uses, expiresAt, revoked: false, createdAt: now, createdBy: me._id });
           audit({ action: "enrollment.codeCreated", targetType: "enrollmentCode", targetId: id, targetLabel: label?.trim() || undefined, summary: `Code for “${g.name}”, ${uses} uses.` });
           const code = `RBX1.${base64Url(`https://demo-deployment-123.convex.cloud#${token(20)}`)}`;
-          return { code, expiresAt };
+          // The demo has no real PC: one simulated PC joins this code a few seconds later (`demo/enrollmentSim.ts`).
+          simulatePcFor(id);
+          return { code, expiresAt, tokenId: id };
         }),
       [],
     );
+  },
+
+  /** `enrollmentCodes:progress` (viewer). `null` subscribes to nothing (state `loading`, like Convex's "skip"). */
+  useEnrollmentProgress(tokenId) {
+    const state = useDemoQuery(`enrollmentCodes:progress:${tokenId ?? "skip"}`, (db): EnrollmentProgress | null => {
+      if (tokenId === null) return null;
+      requireReader();
+      const t = find(db.tokens, tokenId);
+      const pcs: EnrollmentPc[] = simulatedPcIds(t._id)
+        .map((id) => db.devices.find((d) => d._id === id))
+        .filter((d): d is DbDevice => d !== undefined)
+        .sort((a, b) => b.enrolledAt - a.enrolledAt)
+        .slice(0, 10)
+        .map((d) => {
+          const phase = db.reports.get(d._id)?.kioskPhase;
+          return { _id: d._id, name: d.name, enrolledAt: d.enrolledAt, online: !d.revoked && db.onlineIds.has(d._id), ...(phase === undefined ? {} : { kioskPhase: phase }) };
+        });
+      const usesLeft = Math.max(0, t.usesLeft);
+      const release = db.org.ruleboxRelease;
+      return {
+        label: t.label,
+        groupId: t.groupId,
+        groupName: groupName(db, t.groupId),
+        usesTotal: t.usesTotal,
+        usesLeft,
+        expiresAt: t.expiresAt,
+        revoked: t.revoked,
+        joined: Math.max(0, t.usesTotal - usesLeft),
+        pcs,
+        // As the server: the organization's release, else none. The demo shows a made-up one so the download button has an address.
+        download: release ? { version: release.version, url: release.url, sizeBytes: release.sizeBytes } : DEMO_DOWNLOAD,
+      };
+    });
+    if (tokenId === null) return { status: "loading" };
+    if (state.status !== "ready") return state;
+    return state.data === null ? { status: "loading" } : { status: "ready", data: state.data };
   },
 
   useRevokeEnrollmentCode() {
@@ -3019,6 +3103,7 @@ export const demoEnrollmentApi: EnrollmentApi = {
             const t = find(db.tokens, tokenId);
             if (t.revoked) return;
             t.revoked = true;
+            stopSimulation(t._id);
             audit({ action: "enrollment.codeRevoked", targetType: "enrollmentCode", targetId: t._id, targetLabel: t.label, summary: "Code revoked." });
           },
           // A major action on the server (plan 4.16): fresh step-up.

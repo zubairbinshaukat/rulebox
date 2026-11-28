@@ -50,12 +50,13 @@ function checkBounds(uses: number, ttlMinutes: number): void {
  * code ONCE. `plan_limit` (detail "enrollmentCodes") at the plan's
  * `maxEnrollmentCodesActive`, detail "suspended" for a suspended
  * organization; `not_found` for a group of another organization; `not_ready`
- * when the deployment URL is not one the agent accepts.
+ * when the deployment URL is not one the agent accepts. Returns `tokenId` (the row id, never secret) too, so the "Add a PC" wizard can
+ * watch `enrollmentCodes:progress` of the code it just made (UI pass, enrollment plan 3.3).
  */
 export const create = memberAction("admin")({
   args: { groupId: v.string(), uses: v.number(), ttlMinutes: v.number(), label: v.optional(v.string()) },
-  returns: v.object({ code: v.string(), expiresAt: v.number() }),
-  handler: async (ctx, args): Promise<{ code: string; expiresAt: number }> => {
+  returns: v.object({ code: v.string(), expiresAt: v.number(), tokenId: v.id("enrollmentTokens") }),
+  handler: async (ctx, args): Promise<{ code: string; expiresAt: number; tokenId: Id<"enrollmentTokens"> }> => {
     checkBounds(args.uses, args.ttlMinutes);
     const label = normalizeLabel(args.label, MAX_CODE_LABEL);
     if (label === null) fail("invalid_argument", { field: "label" });
@@ -64,7 +65,7 @@ export const create = memberAction("admin")({
       fail("not_ready", { detail: "this deployment's URL cannot be used for enrollment" });
     }
     const token = randomCrockford(ctx, ENROLLMENT_TOKEN_LENGTH);
-    const expiresAt: number = await ctx.runMutation(internal.enrollmentCodes.storeCode, {
+    const stored: { expiresAt: number; tokenId: Id<"enrollmentTokens"> } = await ctx.runMutation(internal.enrollmentCodes.storeCode, {
       orgId: ctx.orgId,
       actor: ctx.actor,
       groupId: args.groupId,
@@ -73,7 +74,7 @@ export const create = memberAction("admin")({
       label,
       tokenHash: sha256HexSync(token),
     });
-    return { code: formatEnrollmentCode(convexUrl, token), expiresAt };
+    return { code: formatEnrollmentCode(convexUrl, token), expiresAt: stored.expiresAt, tokenId: stored.tokenId };
   },
 });
 
@@ -90,7 +91,7 @@ export const storeCode = internalMutation({
     label: v.optional(v.string()),
     tokenHash: v.string(),
   },
-  returns: v.number(),
+  returns: v.object({ expiresAt: v.number(), tokenId: v.id("enrollmentTokens") }),
   handler: async (ctx, args) => {
     checkBounds(args.uses, args.ttlMinutes);
     if (!/^[0-9a-f]{64}$/.test(args.tokenHash)) fail("invalid_argument");
@@ -142,7 +143,7 @@ export const storeCode = internalMutation({
       targetLabel: args.label ?? group.name,
       summary: `Created an enrollment code for the group ${group.name}: ${args.uses} ${args.uses === 1 ? "use" : "uses"}, valid ${describeTtl(args.ttlMinutes)}`,
     });
-    return expiresAt;
+    return { expiresAt, tokenId };
   },
 });
 
@@ -229,6 +230,83 @@ export const list = memberQuery("viewer")({
       });
     }
     return { ...result, page };
+  },
+});
+
+/** PCs `progress` names (the newest ones; `joined` carries the exact count). */
+export const MAX_PROGRESS_PCS = 10;
+
+const progressPc = v.object({
+  _id: v.id("devices"),
+  name: v.string(),
+  enrolledAt: v.number(),
+  online: v.boolean(),
+  kioskPhase: v.optional(v.string()),
+});
+
+const progressValue = v.object({
+  label: v.optional(v.string()),
+  groupId: v.optional(v.id("groups")),
+  groupName: v.optional(v.string()),
+  usesTotal: v.number(),
+  usesLeft: v.number(),
+  expiresAt: v.number(),
+  revoked: v.boolean(),
+  /** PCs that joined with this code (uses taken; for a code made before `usesTotal` existed: the PCs found, at most MAX_PROGRESS_PCS). */
+  joined: v.number(),
+  pcs: v.array(progressPc),
+  /** The Rulebox build the organization set (Settings, Updates), for the "Download Rulebox" action; null = none set. */
+  download: v.union(v.object({ version: v.string(), url: v.string(), sizeBytes: v.number() }), v.null()),
+});
+
+/**
+ * What the "Add a PC" wizard shows while it waits for a code to be used (viewer; subscribed ONLY while step 2 / 3 is on screen):
+ * the code row, its group name, the organization's Rulebox release (the download link) and the newest MAX_PROGRESS_PCS PCs that joined
+ * with the code, each with its presence row (online) and summary row (kiosk phase). `not_found` for another organization's id, a deleted
+ * code or garbage. No `nowMs` argument: the screen derives "expired" from `expiresAt` with its own clock, so this query re-runs only when
+ * the token, one of those PC rows or the organization row changes (an enrollment, a revoke, a presence or kiosk-phase transition), never
+ * by the clock and never on a ping (liveness is another table). Never the code or its hash.
+ * Reads <= 3 (wrapper) + token + group + organization + 10 PCs + 10 presence rows + 10 summary rows = 36.
+ */
+export const progress = memberQuery("viewer")({
+  args: { tokenId: v.string() },
+  returns: progressValue,
+  handler: async (ctx, args) => {
+    const token = await getInOrg(ctx, "enrollmentTokens", args.tokenId, ctx.orgId);
+    const group = token.groupId === undefined ? null : await ctx.db.get(token.groupId);
+    const org = await ctx.db.get(ctx.orgId);
+    const rows = await ctx.db
+      .query("devices")
+      .withIndex("by_org_enrollment_token", (q) => q.eq("orgId", ctx.orgId).eq("enrollmentTokenId", token._id))
+      .order("desc")
+      .take(MAX_PROGRESS_PCS);
+    const pcs = [];
+    for (const d of rows) {
+      const presence = await ctx.db.query("devicePresence").withIndex("by_device", (q) => q.eq("deviceId", d._id)).first();
+      const summary = await ctx.db.query("deviceSummary").withIndex("by_device", (q) => q.eq("deviceId", d._id)).first();
+      pcs.push({
+        _id: d._id,
+        name: d.name,
+        enrolledAt: d.enrolledAt,
+        online: presence?.online === true && presence.revoked !== true,
+        ...(summary?.kioskPhase === undefined ? {} : { kioskPhase: summary.kioskPhase }),
+      });
+    }
+    const usesLeft = Math.max(0, token.usesLeft);
+    const joined = token.usesTotal === undefined ? pcs.length : Math.max(0, token.usesTotal - usesLeft);
+    const release = org?.phase6Settings?.ruleboxRelease;
+    return {
+      label: token.label,
+      groupId: group?.orgId === ctx.orgId ? group._id : undefined,
+      groupName: group?.orgId === ctx.orgId ? group.name : undefined,
+      usesTotal: token.usesTotal ?? usesLeft + joined,
+      usesLeft,
+      expiresAt: token.expiresAt,
+      revoked: token.revoked === true,
+      joined,
+      pcs,
+      download: release === undefined ? null : { version: release.version, url: release.url, sizeBytes: release.sizeBytes },
+    };
   },
 });
 

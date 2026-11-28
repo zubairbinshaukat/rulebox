@@ -219,8 +219,9 @@ export default defineConfig(({ mode, command }) => {
             // of the other screens stay out, so no page loads icons it does not draw.
             { name: "icons", test: new RegExp(`~icons[\\\\/]solar[\\\\/](${SHELL_ICONS.join("|")})-(linear|bold-duotone)\\.jsx$`) },
             // `lib/cardLayout.ts`, `lib/columns.ts` and `lib/rowClick.ts` serve the list components only (the Cards view is a
-            // lazy chunk), so they stay out of `core` too.
-            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!(stepup|screenStrings|enrollment|devices|apps|employees|audit|members|lockdown|release)[\\/])(?!components[\\/](AppTile|FileChip|IconButton|InfoTip|LogoMotion|Notice|Panel|ProgressBar|SearchSelect|Select|Slider|StatCard|Surface|Tabs|TitleBar)\.)(?!floating\.)(?!(cardLayout|columns|rowClick)\.).*\.tsx?$/ },
+            // lazy chunk), so they stay out of `core` too. So do `lib/qr.ts` (the QR dialog of Add a PC) and `lib/drivers/` (the zip and
+            // INF readers of the driver form): each is reached only through a dynamic import.
+            { name: "core", test: /([\\/]apps[\\/]dashboard[\\/]src[\\/](lib|data)|[\\/]packages[\\/]ui[\\/]src)[\\/](?!(stepup|screenStrings|enrollment|devices|apps|employees|audit|members|lockdown|release|drivers)[\\/])(?!components[\\/](AppTile|FileChip|IconButton|InfoTip|LogoMotion|Notice|Panel|ProgressBar|SearchSelect|Select|Slider|StatCard|Surface|Tabs|TitleBar)\.)(?!floating\.)(?!(cardLayout|columns|rowClick|qr)\.).*\.tsx?$/ },
             // The four tiny page parts every signed-in screen shares (card, page header, relative time,
             // role gate) ride along: four 0.2 to 0.5 KB files cost more in headers than here, in one.
             { name: "core", test: /[\\/]apps[\\/]dashboard[\\/]src[\\/]components[\\/](Card|PageHeader|RelativeTime|RoleGate)\.tsx$/ },

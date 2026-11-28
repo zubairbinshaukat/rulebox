@@ -8,4 +8,4 @@ import type { EnrollmentApi } from "./api";
 
 const api: EnrollmentApi = enrollmentApi;
 
-export const { useEnrollmentScreen, useCreateEnrollmentCode, useRevokeEnrollmentCode } = api;
+export const { useEnrollmentScreen, useCreateEnrollmentCode, useRevokeEnrollmentCode, useEnrollmentProgress } = api;

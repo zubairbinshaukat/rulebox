@@ -52,6 +52,13 @@ export const enrollText = {
   codeHowToCli: "Without the installer: run rulebox-agent enroll followed by the code, as an administrator.",
   codeDone: "Done, hide the code",
 
+  // The QR dialog of "Add a PC" (UI pass; `QrDialog.tsx`). The wizard's own strings replace this file's old dialog texts in plan step 8: keep these.
+  qr: "QR code",
+  qrTitle: "Scan the code",
+  qrLabel: "QR code of the enrollment code",
+  qrHint: "Point a phone or tablet camera at it to copy the code across. It holds the code and nothing else.",
+  qrFailed: "Couldn't make the QR code. Copy the code instead.",
+
   // List.
   listCaption: "Enrollment codes",
   colLabel: "Code",

@@ -60,6 +60,34 @@ const COMPLETE_CALLS: Record<string, (f: Fixture) => Promise<() => Promise<unkno
     await createKeys(f.t, f.orgId);
     return () => f.accessor.admin.action(api.wifi.setPassphrase, { id: f.wifiId, passphrase: "correct horse battery", expectedRevision: 1 });
   },
+  // UI pass (enrollment plan 4.3): the whole call, a draft + its password + one snapshot of the fixture's group.
+  "wifi:createWithPassphrase": async (f) => {
+    setMaster(MASTER_A);
+    await createKeys(f.t, f.orgId);
+    return () =>
+      f.accessor.admin.action(api.wifi.createWithPassphrase, {
+        name: "Io",
+        ssid: "Io",
+        hidden: false,
+        security: "wpa2Personal",
+        autoConnect: true,
+        groupIds: [f.groupId],
+        passphrase: "correct horse battery",
+      });
+  },
+  // UI pass (enrollment plan 3.3): the large organization's own code has 200 PCs (each with presence and summary rows), so the call reads its
+  // full 10 PCs; the organization also carries a release (the download link).
+  "enrollmentCodes:progress": async (f) => {
+    const tokenId = await f.t.run(async (ctx) => {
+      const org = await ctx.db.get(f.orgId);
+      await ctx.db.patch(f.orgId, {
+        phase6Settings: { ...org?.phase6Settings, ruleboxRelease: { version: "0.1.0", url: "https://example.com/Rulebox-0.1.0-x64.msi", sha256: "a".repeat(64), sizeBytes: 31_000_000 } },
+      });
+      const row = await ctx.db.query("enrollmentTokens").withIndex("by_token_hash", (q) => q.eq("tokenHash", sha256HexSync(`large-${f.orgId}`))).unique();
+      return row!._id;
+    });
+    return () => f.accessor.viewer.query(api.enrollmentCodes.progress, { tokenId });
+  },
   "account:redeemPinReset": async (f) => {
     const m = await asMember(f.t, { role: "viewer", orgId: f.orgId }); // a session created just now is "fresh"
     await f.t.run((ctx) =>

@@ -30,6 +30,45 @@ function hasControl(text: string): boolean {
   return false;
 }
 
+/** The last path segment of a link (or a file name), without query and fragment, percent-decoded when it can be. */
+function lastSegment(linkOrFileName: string): string {
+  const withoutQuery = linkOrFileName.trim().split(/[?#]/)[0] ?? "";
+  const segment = withoutQuery.split(/[/\\]/).pop() ?? "";
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+/**
+ * What a download link (or the name of a file picked on this computer) delivers, from its ending: `.zip` is a driver package with an
+ * INF file inside (`inf`), `.msi` an MSI, `.exe` a vendor installer. Null when the ending says nothing (the admin picks the type).
+ */
+export function kindFromUrl(linkOrFileName: string): DriverKind | null {
+  const name = lastSegment(linkOrFileName).toLowerCase();
+  if (name.endsWith(".zip")) return "inf";
+  if (name.endsWith(".msi")) return "msi";
+  if (name.endsWith(".exe")) return "exe";
+  return null;
+}
+
+/**
+ * A readable name for the driver from the file name in its link: no extension, underscores and plus signs as spaces (and hyphens too
+ * when the name has no space at all, "HP-Universal-Print"), at most `MAX_DRIVER_NAME` characters. Empty when the link has no file name.
+ */
+export function nameFromUrl(linkOrFileName: string): string {
+  const file = lastSegment(linkOrFileName).replace(/\.(zip|msi|exe)$/i, "");
+  let name = file.replace(/[_+]+/g, " ").trim();
+  if (!name.includes(" ")) name = name.replace(/-+/g, " ");
+  name = Array.from(name)
+    .filter((ch) => !hasControl(ch))
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim();
+  return Array.from(name).slice(0, MAX_DRIVER_NAME).join("").trim();
+}
+
 export type NameProblem = "empty" | "length" | "characters";
 
 export function driverNameProblem(name: string): NameProblem | null {

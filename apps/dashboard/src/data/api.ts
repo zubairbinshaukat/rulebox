@@ -45,6 +45,7 @@ import type {
   WebAppInput,
   WebMeta,
   WebPermissions,
+  WifiCreateInput,
   WifiDetail,
   WifiInput,
   WingetResolved,
@@ -229,6 +230,16 @@ export interface DataApi {
    * answer ever returns it. Resolves to the revision to send next.
    */
   useSetWifiPassphrase: Mutation<{ id: Id; passphrase: string; expectedRevision: number }, { revision: number }>;
+  /**
+   * `wifi:createWithPassphrase` (admin ACTION; UI pass): a NEW secured network together with its password, in one call and one
+   * publish (no PC ever sees the network without its password). `security` must not be "open": an open network has no password
+   * and is made with `useSaveWifi`. Resolves to the id and revision 2. Errors as `useSaveWifi` and `useSetWifiPassphrase`:
+   * `invalid_argument` (field `name` | `ssid` | `groupIds` | `passphrase` + detail `length` | `characters`, field `security` detail
+   * `open`), `not_found` (a group), `too_large` (detail `wifi`: 50 networks), `not_ready` (detail `sealing_key`), `rate_limited`.
+   * A failure after the network was made removes it again: nothing is left to clean up. The password lives only in the caller's
+   * form state until the call returns (never in a query, toast, error sentence, storage or URL).
+   */
+  useCreateWifiWithPassphrase: Mutation<WifiCreateInput, { id: Id; revision: number }>;
   /** `networks:printerDetail` (viewer) with the apply counts, computed on demand. A NEW printer has no detail: its screen builds the blank form itself. */
   usePrinterDetail: (id: Id) => QueryState<PrinterDetail>;
   /** `networks:savePrinter` (admin): create, or update with `expectedRevision`. Resolves to the id and the revision to send next. */

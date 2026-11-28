@@ -73,6 +73,13 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   "enrollmentCodes:create": { maxReads: 4 + 5 + 201, maxReadBytes: 90_000, maxWrites: 3, maxWriteBytes: 1_536 },
   // wrapper (3) + a page of <= 50 codes + their groups and creators (cached per call).
   "enrollmentCodes:list": { maxReads: 3 + 50 + 50 + 50, maxReadBytes: 60_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // UI pass (enrollment plan 3.3), the "Add a PC" wizard, subscribed ONLY while step 2 / 3 is on screen: wrapper (3) + the code + its group + the
+  // organization (the download link) + the newest <= 10 PCs of the code (`devices.by_org_enrollment_token`) + each one's presence row and summary
+  // row. Re-runs when the code row, one of those rows or the organization row changes (an enrollment, a revoke, an online / kiosk-phase
+  // transition); never by the clock (no `nowMs`) and never on a ping (liveness is its own table).
+  // MEASURED (`IO_REPORT=1`, the large-org fixture's own code: 200 PCs on it, release set, so the full 10 PCs): 34 reads / 8.8 KB, 0 writes
+  // (tables: the member wrapper, enrollmentTokens, organizations, devices, devicePresence, deviceSummary). A code without PCs: 5 reads.
+  "enrollmentCodes:progress": { maxReads: 3 + 1 + 1 + 1 + 10 + 10 + 10, maxReadBytes: 20_000, maxWrites: 0, maxWriteBytes: 0, live: true },
   // wrapper + step-up (4), token, orgStats; writes: token, orgStats, audit. Already revoked: 0 writes.
   "enrollmentCodes:revoke": { maxReads: 6, maxReadBytes: 2_048, maxWrites: 3, maxWriteBytes: 1_024 },
   // Public (Step 7 shape). Limiter global + per org (2 reads, 2 writes), token, credentials by
@@ -670,13 +677,6 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // wrapper (3) + group + settings row (+ the organization row while the group has none) + the newest <= 51 exceptions (~0.5 KB) + the apps they
   // name (<= 50, one get each, cached) + <= 51 open findings (~0.6 KB). Re-runs when the settings, an exception or an OPEN finding changes.
   "lockdown:groupView": { maxReads: 3 + 1 + 1 + 1 + 51 + 50 + 51, maxReadBytes: 170_000, maxWrites: 0, maxWriteBytes: 0, live: true },
-  // wrapper (3) + one page of <= 50 findings (~0.6 KB each). `lockdownFindingDevices` is never read.
-  "lockdown:findings": { maxReads: 3 + 50, maxReadBytes: 40_000, maxWrites: 0, maxWriteBytes: 0, live: true },
-  // The "Allow for app" pickers, subscribed only while the dialog is open: wrapper (3) + <= 500 groups (~0.2 KB) + <= 200 apps (~2 KB).
-  "lockdown:allowOptions": { maxReads: 3 + 500 + 200, maxReadBytes: 520_000, maxWrites: 0, maxWriteBytes: 0, live: true },
-  // wrapper + step-up (4, + the step-up row again on a mode change) + group + settings row + organization + <= 51 Wi-Fi profiles (only when
-  // "managed networks only" is switched on) + one snapshot (<= 1121 reads, 13 writes); writes: settings row + <= 2 audit rows. No change: 0 writes.
-  "lockdown:update": { maxReads: 4 + 1 + 1 + 1 + 1 + 51 + 1121, maxReadBytes: 2_500_000, maxWrites: 13 + 1 + 2, maxWriteBytes: 2_700_000 },
   // The "PCs up to date: n of m" card, subscribed only while the group lockdown screen is open: wrapper (3) + group + rollout row + the group's PCs
   // (<= 201, `devices.by_group`) + the group's apply reports AT OR ABOVE the newest configuration version (<= 201, `by_org_config` range from that
   // version, so a PC that has not caught up yet costs no report read). A separate query so reports never re-run `groupView`.
@@ -688,6 +688,13 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // 200 PCs all up to date 404 reads / 240.5 KB. One catch-up of a 50-PC group with the screen open = 51 runs, about 2.0 MB read (the plan's
   // all-reports read: 7.5 MB). The byte budget keeps room for reports twice that size.
   "lockdown:groupSync": { maxReads: 3 + 1 + 1 + 201 + 201, maxReadBytes: 450_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // wrapper (3) + one page of <= 50 findings (~0.6 KB each). `lockdownFindingDevices` is never read.
+  "lockdown:findings": { maxReads: 3 + 50, maxReadBytes: 40_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // The "Allow for app" pickers, subscribed only while the dialog is open: wrapper (3) + <= 500 groups (~0.2 KB) + <= 200 apps (~2 KB).
+  "lockdown:allowOptions": { maxReads: 3 + 500 + 200, maxReadBytes: 520_000, maxWrites: 0, maxWriteBytes: 0, live: true },
+  // wrapper + step-up (4, + the step-up row again on a mode change) + group + settings row + organization + <= 51 Wi-Fi profiles (only when
+  // "managed networks only" is switched on) + one snapshot (<= 1121 reads, 13 writes); writes: settings row + <= 2 audit rows. No change: 0 writes.
+  "lockdown:update": { maxReads: 4 + 1 + 1 + 1 + 1 + 51 + 1121, maxReadBytes: 2_500_000, maxWrites: 13 + 1 + 2, maxWriteBytes: 2_700_000 },
   // wrapper (4) + finding + app + <= 100 groups (MAX_ALLOW_GROUPS, one read each); the FIRST 10 each: its exceptions (<= 201) + one snapshot; the rest
   // go to `groupBatches:allowBatch` (scheduled, 10 per run); writes per group: exception + <= 13; + finding + audit.
   "lockdown:allow": { maxReads: 4 + 2 + 100 + 10 * 201 + 10 * 1121, maxReadBytes: 2_800_000, maxWrites: 10 * 14 + 2, maxWriteBytes: 2_700_000 },
@@ -716,6 +723,22 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // profile, <= 10 group checks and snapshots; writes: profile, audit, per group <= 13.
   // Step 20b: the first 10 groups only; the others go to `groupBatches:snapshotBatch` (a scheduled run is not a database read or write).
   "wifi:storePassphrase": { maxReads: 1 + 10 + (10 * 921 + 200) + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  // UI pass (enrollment plan 4.3): `wifi:createWithPassphrase` = authorize (4) + prepareCreate + insertDraft + finishCreate (+ the limiter row, a
+  // component call, not counted). No database read happens for the password itself (an action). ONE snapshot per group: half the I/O of
+  // `networks:saveWifi` + `wifi:setPassphrase`, which snapshot every group twice.
+  // MEASURED (`IO_REPORT=1`, fixture group, the complete call): 21 reads / 6.0 KB, 7 writes / 5.0 KB (`wifi:setPassphrase` on a profile: 17 / 5 writes;
+  // the extra writes and reads are the draft's insert + audit and the cap / sealing-key checks).
+  "wifi:createWithPassphrase": { maxReads: 4 + 151 + 50 + (1 + 100 + 10 + (10 * 921 + 200) + 1), maxReadBytes: 2_600_000, maxWrites: 2 + (1 + 1 + 10 * 13 + 3), maxWriteBytes: 2_710_000 },
+  // the sealing key (1) + <= 50 profiles (cap) + <= 100 groups; writes nothing. MEASURED (1 profile, 1 group): 3 reads / 0.8 KB.
+  "wifi:prepareCreate": { maxReads: 1 + 50 + 100, maxReadBytes: 40_000, maxWrites: 0, maxWriteBytes: 0 },
+  // the cap check (<= 50 profiles); writes: the draft profile (no groups, ~0.3 KB) + audit. MEASURED: 1 read, 2 writes / 0.5 KB.
+  "wifi:insertDraft": { maxReads: 50, maxReadBytes: 30_000, maxWrites: 2, maxWriteBytes: 2_048 },
+  // the draft + <= 100 group checks + the first 10 groups' existence reads + their snapshots (<= 921 each + the 200 file-type rules once) +
+  // the rest go to `groupBatches:snapshotBatch`; writes: profile, audit, per group <= 13 (version, rollout, pruned versions, queue).
+  // MEASURED (one fixture group): 14 reads / 4.2 KB, 5 writes / 4.5 KB (same as `wifi:storePassphrase`, 12 / 5).
+  "wifi:finishCreate": { maxReads: 1 + 100 + 10 + (10 * 921 + 200) + 1, maxReadBytes: 2_500_000, maxWrites: 1 + 1 + 10 * 13 + 3, maxWriteBytes: 2_700_000 },
+  // the draft; writes: delete + audit. Anything that is no longer a plain draft: 1 read, 0 writes. MEASURED: 1 read, 2 writes / 0.4 KB.
+  "wifi:discardDraft": { maxReads: 1, maxReadBytes: 2_048, maxWrites: 2, maxWriteBytes: 1_024 },
   // ---- Phase 5 Step 20b: scheduler batches (convex/groupBatches.ts). Never called by a client.
   // `snapshotBatch`: per group (<= SNAPSHOT_BATCH_GROUPS = 10) 1 existence read + one snapshot (<= 921 + the 200 file-type rules once); writes per
   // group <= 13 (version, rollout, <= 10 pruned versions, queue). A group whose content did not change writes nothing.

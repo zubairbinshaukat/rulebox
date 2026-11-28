@@ -25,6 +25,30 @@ export const MAX_WIFI_PROFILES = 50;
 /** The profile's display name. */
 export const MAX_WIFI_NAME = 60;
 
+/** What the form calls a network whose Wi-Fi name is empty or only spaces. */
+export const DEFAULT_WIFI_NAME = "Wi-Fi network";
+/** The byte counter next to the Wi-Fi name appears only from here (and always when over the limit): most names are far shorter. */
+export const SSID_COUNTER_FROM_BYTES = 24;
+
+/** Show the "n of 32 bytes" counter: close to the limit or over it. */
+export function showSsidCounter(ssid: string): boolean {
+  return ssidBytes(ssid) > SSID_COUNTER_FROM_BYTES;
+}
+
+/**
+ * The name Rulebox shows for a network before the admin edits it: the Wi-Fi name, trimmed, without control characters, at most
+ * `MAX_WIFI_NAME` characters (code points, then trimmed again); `DEFAULT_WIFI_NAME` when nothing is left. The SSID itself is never
+ * trimmed (spaces count), only this display name.
+ */
+export function defaultWifiName(ssid: string): string {
+  const cleaned = Array.from(ssid)
+    .filter((ch) => !hasControl(ch))
+    .join("")
+    .trim();
+  const cut = Array.from(cleaned).slice(0, MAX_WIFI_NAME).join("").trim();
+  return cut === "" ? DEFAULT_WIFI_NAME : cut;
+}
+
 /** UTF-8 length of an SSID in bytes: "Café" is 5 bytes. */
 export function ssidBytes(ssid: string): number {
   return new TextEncoder().encode(ssid).length;

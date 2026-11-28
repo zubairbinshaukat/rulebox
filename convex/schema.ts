@@ -409,6 +409,10 @@ export default defineSchema({
     .index("by_org_group_name", ["orgId", "groupId", "name"])
     // Phase 5 Step 16: the PCs of one rollout ring in a group ("everyone" = value "everyone" or no value).
     .index("by_group_ring", ["groupId", "ring"])
+    // UI pass (enrollment plan 3.3): the PCs that joined with one enrollment code, newest first (`enrollmentCodes:progress`, <= 10).
+    // Starts with `orgId` (the plan said `["enrollmentTokenId"]`): the scoped database only lets a member range start with the org or a
+    // checked id field, and `orgId` first keeps the tenant guard unchanged. Creation order follows the last field.
+    .index("by_org_enrollment_token", ["orgId", "enrollmentTokenId"])
     // DEPRECATED: enrollment idempotency for devices enrolled before the
     // credentials split; removed with the narrow step.
     .index("by_secret_hash", ["secretHash"])
@@ -595,6 +599,8 @@ export default defineSchema({
     .index("by_org_archived", ["orgId", "archived"])
     // Phase 4b list sort and search (lib/listing.ts).
     .index("by_org_archived_name", ["orgId", "archived", "name"])
+    // UI pass (add-app D21): `apps:byWinget`, the duplicate notice of the review page (one row per read; websites have no value).
+    .index("by_org_winget", ["orgId", "desktop.wingetId"])
     .searchIndex("search_name", { searchField: "name", filterFields: ["orgId", "archived"] }),
 
   // tiny (Phase 6 Step 10, plan 4.2): one row per Rulebox-managed app WITH a vendor feed. Created, updated and deleted by

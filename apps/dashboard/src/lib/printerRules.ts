@@ -159,6 +159,117 @@ export function queueProblem(text: string): QueueProblem | null {
   return hasControlOrSpace(t) ? "characters" : null;
 }
 
+// ---------------------------------------------------------------- one address field (UI pass, enrollment plan 4.4)
+
+/** What one typed address means: the kind, the address in the shape the server stores, and the port / queue it implies. */
+export interface ParsedPrinterAddress {
+  kind: PrinterKind;
+  address: string;
+  /** Raw printers only; absent = 9100. */
+  port?: number;
+  /** LPR printers only. */
+  queue?: string;
+}
+
+/** The default IPP path most printers answer on. */
+const IPP_DEFAULT_PATH = "/ipp/print";
+/** IPP's own port: `host:631` means IPP, any other port after a bare host means a raw (JetDirect) socket. */
+const IPP_PORT = 631;
+
+function ippHost(host: string): string {
+  return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+}
+
+/** `host`, `[v6]` or `host:port` (digits only, 1-65535). Null when it is none of them. */
+function splitHostPort(text: string): { host: string; port?: number } | null {
+  if (text.startsWith("[")) {
+    const end = text.indexOf("]");
+    if (end < 0) return null;
+    const host = text.slice(1, end);
+    const rest = text.slice(end + 1);
+    if (!isIpv6(host)) return null;
+    if (rest === "") return { host };
+    return /^:\d{1,5}$/.test(rest) && portProblem(rest.slice(1)) === null ? { host, port: Number(rest.slice(1)) } : null;
+  }
+  if (isHost(text)) return { host: text };
+  const colon = text.lastIndexOf(":");
+  if (colon <= 0) return null;
+  const host = text.slice(0, colon);
+  const port = text.slice(colon + 1);
+  if (host.includes(":") || !isHost(host) || !/^\d{1,5}$/.test(port) || portProblem(port) !== null) return null;
+  return { host, port: Number(port) };
+}
+
+/**
+ * Reads what an admin typed into the ONE address field and says which kind of printer it is (null = nothing the server would accept
+ * as a printer; the form then asks again in plain words). Only the shape is judged: the result still goes through `addressProblem`
+ * (a raw host longer than 48 characters, for instance, is parsed as raw and refused there). Spaces around the text are ignored.
+ *
+ * - `\\server\printer` -> a shared printer.
+ * - `ipp://h[:p]/path`, `https://h[:p]/path` -> IPP as typed (no path typed: `/ipp/print`); `ipps://` is the same as `https://`;
+ *   `http://h:631/path` -> `ipp://h:631/path` (a plain http address without a port is port 80: `ipp://h:80/path`).
+ * - `lpr://h/queue` (or `lpd://`) -> LPR with its queue.
+ * - `h:631` -> IPP on that port; `h:<any other port>` -> raw on that port; `[v6]:port` the same.
+ * - `h/path` (no scheme) -> IPP; a bare host or IP (IPv6 too) -> IPP with the usual path `/ipp/print`.
+ */
+export function parsePrinterAddress(text: string): ParsedPrinterAddress | null {
+  const t = text.trim();
+  if (t === "" || t.length > MAX_PRINTER_ADDRESS) return null;
+
+  if (t.startsWith("\\\\")) return addressProblem("share", t) === null ? { kind: "share", address: t } : null;
+
+  const scheme = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/(.*)$/.exec(t);
+  if (scheme !== null) {
+    const name = (scheme[1] ?? "").toLowerCase();
+    const rest = scheme[2] ?? "";
+    if (name === "ipp" || name === "https" || name === "ipps" || name === "http") {
+      const slash = rest.search(/[/?#]/);
+      const authority = slash < 0 ? rest : rest.slice(0, slash);
+      const typedTail = slash < 0 ? "" : rest.slice(slash);
+      // No path typed: the one printers answer on.
+      const tail = typedTail === "" || typedTail === "/" ? IPP_DEFAULT_PATH : typedTail;
+      const hp = splitHostPort(authority);
+      if (hp === null) return null;
+      let address: string;
+      if (name === "http") address = `ipp://${ippHost(hp.host)}:${hp.port ?? 80}${tail}`;
+      else address = `${name === "ipps" ? "https" : name}://${authority}${tail}`;
+      return addressProblem("ipp", address) === null ? { kind: "ipp", address } : null;
+    }
+    if (name === "lpr" || name === "lpd") {
+      const slash = rest.indexOf("/");
+      if (slash < 0) return null;
+      const host = rest.slice(0, slash);
+      const queue = rest.slice(slash + 1);
+      if (!isHost(host.startsWith("[") ? host.slice(1, -1) : host) || queueProblem(queue) !== null) return null;
+      return { kind: "lpr", address: host.startsWith("[") ? host.slice(1, -1) : host, queue: queue.trim() };
+    }
+    return null;
+  }
+
+  // No scheme: `host/path` is an IPP address without the scheme.
+  const slash = t.indexOf("/");
+  if (slash > 0) {
+    const hp = splitHostPort(t.slice(0, slash));
+    if (hp === null) return null;
+    const address = `ipp://${ippHost(hp.host)}${hp.port === undefined ? "" : `:${hp.port}`}${t.slice(slash)}`;
+    return addressProblem("ipp", address) === null ? { kind: "ipp", address } : null;
+  }
+
+  const hp = splitHostPort(t);
+  if (hp === null) return null;
+  if (hp.port === undefined) return { kind: "ipp", address: `ipp://${ippHost(hp.host)}${IPP_DEFAULT_PATH}` };
+  if (hp.port === IPP_PORT) return { kind: "ipp", address: `ipp://${ippHost(hp.host)}:${IPP_PORT}${IPP_DEFAULT_PATH}` };
+  return { kind: "raw", address: hp.host, port: hp.port };
+}
+
+/**
+ * The driver "Automatic" stands for: Windows' IPP class driver for IPP printers, the PCL6 class driver for raw, LPR and shared ones
+ * (both ship with Windows, so nothing has to be delivered). Always a name of `INBOX_DRIVERS`.
+ */
+export function defaultDriverFor(kind: PrinterKind): string {
+  return kind === "ipp" ? "Microsoft IPP Class Driver" : "Microsoft PCL6 Class Driver";
+}
+
 /** The driver names the picker offers: the inbox list, then the names the organization approved (no duplicates). */
 export function driverChoices(approved: readonly string[]): string[] {
   const out = [...INBOX_DRIVERS];

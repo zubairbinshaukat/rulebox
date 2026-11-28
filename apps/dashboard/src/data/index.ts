@@ -91,6 +91,7 @@ export const {
   useSaveWifi,
   useDeleteWifi,
   useSetWifiPassphrase,
+  useCreateWifiWithPassphrase,
   usePrinterDetail,
   useSavePrinter,
   useDeletePrinter,

@@ -22,7 +22,7 @@ import { makeFunctionReference, type FunctionReturnType } from "convex/server";
 import { useCallback, useMemo, useState } from "react";
 import { api } from "@convex/_generated/api";
 import type { DataApi } from "../api";
-import { cappedNumber, type Audience, type BroadcastRow, type FailedInstallRow, type GroupRow, type KeysScreen, type MeResult, type QueryState, type Role } from "../types";
+import { cappedNumber, type Audience, type BroadcastRow, type FailedInstallRow, type GroupRow, type KeysScreen, type MeResult, type QueryState, type Role, type WifiCreateInput } from "../types";
 import { listArgs, type ServerList } from "../serverList";
 import { useMappedList } from "./mapList";
 import { useServerPage } from "./serverList";
@@ -557,6 +557,17 @@ export const liveApi: DataApi = {
   },
   useSetWifiPassphrase() {
     return useMapped(useAction(api.wifi.setPassphrase));
+  },
+  // UI pass: a new secured network with its password in one action (`convex/wifi.ts` `createWithPassphrase`). Only the five profile
+  // fields, the groups and the password go over the wire (no `id` / `expectedRevision`: the server refuses unknown arguments).
+  useCreateWifiWithPassphrase() {
+    const create = useAction(api.wifi.createWithPassphrase);
+    const call = useCallback(
+      (a: WifiCreateInput) =>
+        create({ name: a.name, ssid: a.ssid, hidden: a.hidden, security: a.security, autoConnect: a.autoConnect, groupIds: a.groupIds, passphrase: a.passphrase }),
+      [create],
+    );
+    return useMapped(call);
   },
   // ---- printers (Phase 5 Step 14): same module, same rules.
   usePrinterDetail(id) {

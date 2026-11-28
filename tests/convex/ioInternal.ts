@@ -38,6 +38,16 @@ export type InternalCase = (c: InternalEnv) => Promise<() => Promise<unknown>>;
 /** The app's Argon2id parameters, any salt / hash: what `employees:isAppPhc` and `testing:storeKnownPin` accept. */
 export const PHC = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const HEX = (s: string) => sha256HexSync(s);
+/** The arguments of `wifi:insertDraft` (the first step of `wifi:createWithPassphrase`). */
+const WIFI_DRAFT = (c: { f: { orgId: Id<"organizations"> }; actor: { type: "member"; id: string; label: string } }) => ({
+  orgId: c.f.orgId,
+  actor: c.actor,
+  name: "Draft",
+  ssid: "Draft",
+  hidden: false,
+  security: "wpa2Personal" as const,
+  autoConnect: true,
+});
 const MAIL = { to: "ana@acme.test", subject: "Hello", text: "Body" };
 
 /** The master key + mail settings, as `platform:setSecret` stores them (fetch is stubbed by the test). */
@@ -398,6 +408,33 @@ export const INTERNAL_CALLS: Record<string, InternalCase | InternalCase[]> = {
       expectedRevision: 1,
       atRest: { keyId: "0123456789abcdef", sealed: "AAAA" },
     }),
+  // UI pass (enrollment plan 4.3): `wifi:createWithPassphrase`'s four internal functions. The draft is made unprobed by the cases that need one.
+  "wifi:prepareCreate": async (c) => {
+    setMaster(MASTER_A);
+    await createKeys(c.f.t, c.f.orgId);
+    return () => c.f.t.query(internal.wifi.prepareCreate, { orgId: c.f.orgId, groupIds: [c.f.groupId] });
+  },
+  "wifi:insertDraft": async (c) => () => c.f.t.mutation(internal.wifi.insertDraft, WIFI_DRAFT(c)),
+  "wifi:finishCreate": async (c) => {
+    const id = await c.f.t.mutation(internal.wifi.insertDraft, WIFI_DRAFT(c));
+    return () =>
+      c.f.t.mutation(internal.wifi.finishCreate, {
+        orgId: c.f.orgId,
+        actor: c.actor,
+        by: c.f.targetMemberId,
+        id,
+        groupIds: [c.f.groupId],
+        atRest: { keyId: "0123456789abcdef", sealed: "AAAA" },
+      });
+  },
+  "wifi:discardDraft": async (c) => {
+    const id = await c.f.t.mutation(internal.wifi.insertDraft, WIFI_DRAFT(c));
+    return async () => {
+      const deleted = await c.f.t.mutation(internal.wifi.discardDraft, { orgId: c.f.orgId, actor: c.actor, id });
+      if (!deleted) throw new Error("wifi:discardDraft did not delete the draft"); // a refusal would measure the guard, not the function
+      return deleted;
+    };
+  },
   "seal:jobs": async (c) => {
     const { deviceIds } = await sealingSetup(c, 2);
     return () => c.f.t.query(internal.seal.jobs, { orgId: c.f.orgId, deviceIds });

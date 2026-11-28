@@ -50,6 +50,39 @@
   overflow-wrap: anywhere;
 }
 
+/* The QR dialog (QrDialog.tsx). The picture is black on white in both themes on purpose: scanners need the contrast and a light
+   quiet zone, so these two colours are the one place the tokens are not used. */
+.dash-qr {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.dash-qr__box {
+  width: min(280px, 100%);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border-radius: var(--rb-r-md);
+  background: #fff;
+  overflow: hidden;
+}
+.dash-qr__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.dash-qr__hint,
+.dash-qr__failed {
+  margin: 0;
+  text-align: center;
+  color: var(--rb-muted);
+  max-width: 34ch;
+}
+.dash-qr__failed {
+  color: var(--rb-danger-text);
+}
+
 .dash-ttl-custom {
   display: flex;
   gap: 8px;

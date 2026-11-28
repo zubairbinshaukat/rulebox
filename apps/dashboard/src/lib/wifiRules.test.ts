@@ -1,5 +1,37 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SSID_BYTES, passphraseProblem, ssidBytes, ssidProblem } from "./wifiRules";
+import { DEFAULT_WIFI_NAME, defaultWifiName, MAX_SSID_BYTES, MAX_WIFI_NAME, passphraseProblem, showSsidCounter, ssidBytes, ssidProblem } from "./wifiRules";
+
+describe("defaultWifiName (the name Rulebox shows before the admin edits it)", () => {
+  it("is the Wi-Fi name, trimmed", () => {
+    expect(defaultWifiName("Shop floor")).toBe("Shop floor");
+    expect(defaultWifiName("  Shop floor  ")).toBe("Shop floor");
+    expect(defaultWifiName("A&B <\"it's\">")).toBe("A&B <\"it's\">");
+  });
+
+  it("falls back when nothing is left", () => {
+    expect(defaultWifiName("")).toBe(DEFAULT_WIFI_NAME);
+    expect(defaultWifiName("   ")).toBe("Wi-Fi network");
+    expect(defaultWifiName("\u0007\u0000")).toBe("Wi-Fi network");
+  });
+
+  it("drops control characters and is at most 60 characters (not bytes), trimmed again after the cut", () => {
+    expect(defaultWifiName("a\u0007b")).toBe("ab");
+    expect(defaultWifiName("x".repeat(80))).toBe("x".repeat(MAX_WIFI_NAME));
+    expect(defaultWifiName("é".repeat(40))).toBe("é".repeat(40)); // 80 bytes, 40 characters
+    expect(defaultWifiName(`${"y".repeat(59)} tail`)).toBe("y".repeat(59)); // the cut lands on the space
+    expect(Array.from(defaultWifiName("😀".repeat(70)))).toHaveLength(MAX_WIFI_NAME); // code points, never half a pair
+  });
+});
+
+describe("the byte counter", () => {
+  it("shows only near or over the 32-byte limit", () => {
+    expect(showSsidCounter("Shop floor")).toBe(false);
+    expect(showSsidCounter("a".repeat(24))).toBe(false);
+    expect(showSsidCounter("a".repeat(25))).toBe(true);
+    expect(showSsidCounter("é".repeat(13))).toBe(true); // 26 bytes
+    expect(showSsidCounter("a".repeat(40))).toBe(true);
+  });
+});
 
 describe("Wi-Fi rules (mirror of the server)", () => {
   it("an SSID is 1 to 32 bytes of UTF-8, not characters", () => {

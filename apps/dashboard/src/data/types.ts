@@ -1214,6 +1214,46 @@ export interface EnrollmentInput {
   label?: string;
 }
 
+/** `enrollmentCodes:create` (an action): the code exists only in this answer. `tokenId` is the row id (not secret): what `useEnrollmentProgress` watches. */
+export interface EnrollmentCreated {
+  code: string;
+  expiresAt: number;
+  tokenId: Id;
+}
+
+/** One PC that joined with a code (`enrollmentCodes:progress`). `kioskPhase` is what the PC reported: absent until its first report. */
+export interface EnrollmentPc {
+  _id: Id;
+  name: string;
+  enrolledAt: number;
+  online: boolean;
+  kioskPhase?: KioskPhase;
+}
+
+/**
+ * `enrollmentCodes:progress` (viewer): what the "Add a PC" wizard shows while it waits for one code to be used. Never the code or its
+ * hash. The clock is the screen's: "expired" is `expiresAt <= now` (use `displayState` from `screens/enrollment/model`), not a field.
+ */
+export interface EnrollmentProgress {
+  label?: string;
+  groupId?: Id;
+  groupName?: string;
+  /** For a code made before totals existed: `usesLeft + joined`. */
+  usesTotal: number;
+  usesLeft: number;
+  expiresAt: number;
+  revoked: boolean;
+  /** PCs that joined with this code (exact, also above the 10 named in `pcs`). */
+  joined: number;
+  /** The newest 10 PCs that joined with this code, newest first. */
+  pcs: EnrollmentPc[];
+  /** The Rulebox build the organization chose (Settings, Updates); null = none set: the screen links to the releases page. */
+  download: { version: string; url: string; sizeBytes: number } | null;
+}
+
+/** `wifi:createWithPassphrase`: a new SECURED network with its password (`security` is never "open"; an open network is `saveWifi`). */
+export type WifiCreateInput = Omit<WifiInput, "id" | "expectedRevision"> & { passphrase: string };
+
 // ---------------------------------------------------------------- audit
 
 export type AuditActorType = "member" | "device" | "system";
