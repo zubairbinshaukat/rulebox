@@ -8,7 +8,7 @@ import { MeContext } from "../lib/member";
 import { strings } from "../lib/strings";
 import { appEditStrings } from "../lib/screenStrings/appEdit";
 import { auditStrings } from "../lib/screenStrings/audit";
-import { deviceStrings } from "../lib/screenStrings/device";
+import { deviceText } from "./device/strings";
 import { installStrings } from "../lib/screenStrings/install";
 import { installStateStrings } from "../lib/screenStrings/installState";
 
@@ -348,46 +348,60 @@ describe("AppEdit: install status (apps:installSummary, apps:installs)", () => {
   });
 });
 
-describe("DeviceDetail: installs (fleet:installs) and history (audit:forTarget)", () => {
-  const detail = {
+describe("DeviceDetail: installs (fleet:installs, Apps tab) and history (audit:forTarget, Activity tab)", () => {
+  const page = {
     _id: "d1",
     name: "Front desk",
     revision: 7,
     kioskEnabled: true,
     enrolledAt: Date.now() - 3_600_000,
     group: { _id: "g1", name: "Sales" },
-    state: "active",
     presence: { online: true, since: 1, revoked: false },
-    summary: { agentVersion: "0.4.0", outOfSupport: false, updatedAt: 1 },
+    outOfSupport: false,
+    latestVersion: null,
+    planState: null,
     report: null,
-    versions: [],
     flags: { noGroup: false, revoked: false, rotateCredential: false },
-    groups: [{ _id: "g1", name: "Sales" }],
+    lock: null,
+    failedInstalls: { count: 0, more: false, names: [] },
+    network: { wifiFailed: 0, printersFailed: 0 },
   };
+  const APPS = "/devices/d1?tab=apps";
+  const ACTIVITY = "/devices/d1?tab=activity";
 
-  it("lists the PC's results with state pills and a Retry on a failed one (admin); the history asks for this PC", async () => {
-    cx.results["fleet:get"] = detail;
+  it("Apps lists the PC's results with state pills and a Retry on a failed one (admin)", async () => {
+    cx.results["fleet:page"] = page;
     cx.results["fleet:liveness"] = { lastContactAt: Date.now(), online: true, fastUntil: null };
     cx.fns["fleet:watch"] = async () => ({ fastUntil: null });
     cx.pages["fleet:installs"] = [
       { _id: "i1", appId: "a1", appName: "Reader", state: "failed", attempts: 3, detail: "The installer exited with an error.", updatedAt: Date.now() },
       { _id: "i2", appId: "a2", appName: "Docs", state: "installed", attempts: 1, updatedAt: Date.now() },
     ];
-    cx.pages["audit:forTarget"] = [entry("e1", { action: "device.renamed", summary: "Renamed the PC Desk to Front desk" })];
-    ui(<DeviceDetail />, "admin", "/devices/d1");
+    ui(<DeviceDetail />, "admin", APPS);
+    const reader = ((await screen.findByRole("link", { name: "Reader" })).closest("tr")) as HTMLElement;
     expect(lastPaged("fleet:installs")?.args).toMatchObject({ deviceId: "d1", paginationOpts: { numItems: 10, cursor: null }, sort: { key: "updated", dir: "desc" } });
-    expect(cx.paged.some((p) => p.name === "audit:forTarget" && (p.args as { targetId: string }).targetId === "d1")).toBe(true);
-    const reader = screen.getByRole("link", { name: "Reader" }).closest("tr") as HTMLElement;
     expect(within(reader).getByText(installStateStrings.failed)).toBeTruthy();
     expect(within(reader).getByRole("button", { name: installStrings.retry })).toBeTruthy();
     const docs = screen.getByRole("link", { name: "Docs" }).closest("tr") as HTMLElement;
     expect(within(docs).getByText(installStateStrings.installed)).toBeTruthy();
     expect(within(docs).queryByRole("button", { name: installStrings.retry })).toBeNull();
-    expect(screen.getByText("Renamed the PC Desk to Front desk")).toBeTruthy();
+    // The history belongs to the Activity tab: nothing asks for it here.
+    expect(cx.paged.some((p) => p.name === "audit:forTarget")).toBe(false);
+  });
+
+  it("Activity shows this PC's history (audit:forTarget asks for this PC) and does not ask for installs", async () => {
+    cx.results["fleet:page"] = page;
+    cx.results["fleet:liveness"] = { lastContactAt: Date.now(), online: true, fastUntil: null };
+    cx.fns["fleet:watch"] = async () => ({ fastUntil: null });
+    cx.pages["audit:forTarget"] = [entry("e1", { action: "device.renamed", summary: "Renamed the PC Desk to Front desk" })];
+    ui(<DeviceDetail />, "admin", ACTIVITY);
+    expect(await screen.findByText("Renamed the PC Desk to Front desk")).toBeTruthy();
+    expect(cx.paged.some((p) => p.name === "audit:forTarget" && (p.args as { targetId: string }).targetId === "d1")).toBe(true);
+    expect(cx.paged.some((p) => p.name === "fleet:installs")).toBe(false);
   });
 
   function withFailedInstall(extra: Record<string, unknown> = {}) {
-    cx.results["fleet:get"] = detail;
+    cx.results["fleet:page"] = page;
     cx.results["fleet:liveness"] = { lastContactAt: Date.now(), online: true, fastUntil: null };
     cx.fns["fleet:watch"] = async () => ({ fastUntil: null });
     cx.pages["fleet:installs"] = [{ _id: "i1", appId: "a1", appName: "Reader", state: "failed", attempts: 3, updatedAt: Date.now(), ...extra }];
@@ -397,8 +411,8 @@ describe("DeviceDetail: installs (fleet:installs) and history (audit:forTarget)"
     withFailedInstall();
     const retry = vi.fn(async () => undefined);
     cx.fns["apps:retry"] = retry;
-    ui(<DeviceDetail />, "admin", "/devices/d1");
-    fireEvent.click(screen.getByRole("button", { name: installStrings.retry }));
+    ui(<DeviceDetail />, "admin", APPS);
+    fireEvent.click(await screen.findByRole("button", { name: installStrings.retry }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText(installStrings.retryConfirmBody("Reader"))).toBeTruthy();
     expect(retry).not.toHaveBeenCalled();
@@ -414,26 +428,25 @@ describe("DeviceDetail: installs (fleet:installs) and history (audit:forTarget)"
     expect(screen.getByText(installStrings.retried)).toBeTruthy();
   });
 
-  it("Retry is disabled, with the reason, for an app the server says cannot be retried", () => {
+  it("Retry is disabled, with the reason, for an app the server says cannot be retried", async () => {
     withFailedInstall({ retryable: false });
-    ui(<DeviceDetail />, "admin", "/devices/d1");
-    const button = screen.getByRole("button", { name: installStrings.retry }) as HTMLButtonElement;
+    ui(<DeviceDetail />, "admin", APPS);
+    const button = (await screen.findByRole("button", { name: installStrings.retry })) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     expect(button.getAttribute("title")).toBe(installStrings.retryUnavailable);
   });
 
-  it("the history of another PC does not show this PC's rows while its first page loads", () => {
+  it("the history of another PC does not show this PC's rows while its first page loads", async () => {
     withFailedInstall();
     cx.pages["audit:forTarget"] = [entry("e1", { summary: "Renamed the PC Desk to Front desk" })];
-    const view = ui(<DeviceDetail />, "viewer", "/devices/d1");
-    expect(screen.getByText("Renamed the PC Desk to Front desk")).toBeTruthy();
+    const view = ui(<DeviceDetail />, "viewer", ACTIVITY);
+    expect(await screen.findByText("Renamed the PC Desk to Front desk")).toBeTruthy();
     cx.loading = (name) => name === "audit:forTarget";
-    cx.results["fleet:get"] = { ...detail, _id: "d2" };
-    view.rerender(tree(<DeviceDetail />, "viewer", "/devices/d1"));
+    cx.results["fleet:page"] = { ...page, _id: "d2" };
+    view.rerender(tree(<DeviceDetail />, "viewer", ACTIVITY));
     expect(screen.queryByText("Renamed the PC Desk to Front desk")).toBeNull();
   });
 });
-
 describe("Step 17 follow-ups: roster notice, no-group link, short pages, capped counts", () => {
   it("Overview: a waiting roster update is listed and points to the signing settings; without one it is absent", () => {
     cx.results["overview:get"] = overviewData({ rosterPending: true });
@@ -488,39 +501,60 @@ describe("Step 17 follow-ups: roster notice, no-group link, short pages, capped 
     expect(screen.queryByText(appEditStrings.installCapped)).toBeNull();
   });
 
-  it("DeviceDetail: an empty page with more to read offers Next instead of 'no apps are assigned'", () => {
-    cx.results["fleet:get"] = {
+  it("DeviceDetail Apps: an empty page with more to read offers Next instead of 'no apps are assigned'", async () => {
+    cx.results["fleet:page"] = {
       _id: "d1",
       name: "Front desk",
       revision: 7,
       kioskEnabled: true,
       enrolledAt: Date.now() - 3_600_000,
       group: { _id: "g1", name: "Sales" },
-      state: "active",
       presence: { online: true, since: 1, revoked: false },
-      summary: null,
+      outOfSupport: false,
+      latestVersion: null,
+      planState: null,
       report: null,
-      versions: [],
       flags: { noGroup: false, revoked: false, rotateCredential: false },
-      groups: [{ _id: "g1", name: "Sales" }],
+      lock: null,
+      failedInstalls: { count: 0, more: false, names: [] },
+      network: { wifiFailed: 0, printersFailed: 0 },
     };
     cx.results["fleet:liveness"] = { lastContactAt: Date.now(), online: true, fastUntil: null };
     cx.fns["fleet:watch"] = async () => ({ fastUntil: null });
     cx.pages["fleet:installs"] = [];
     cx.statuses["fleet:installs"] = "CanLoadMore";
-    ui(<DeviceDetail />, "viewer", "/devices/d1");
-    expect(screen.queryByText(deviceStrings.installsNone)).toBeNull();
-    expect(screen.getByText(strings.table.emptyPage)).toBeTruthy();
+    ui(<DeviceDetail />, "viewer", "/devices/d1?tab=apps");
+    expect(await screen.findByText(strings.table.emptyPage)).toBeTruthy();
+    expect(screen.queryByText(deviceText.appsNone)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     expect(lastPaged("fleet:installs")?.args).toMatchObject({ deviceId: "d1", paginationOpts: { numItems: 10, cursor: "c:0" } });
   });
-});
 
+  it("DeviceDetail Apps: nothing assigned says so and an admin can open the group", async () => {
+    cx.results["fleet:page"] = {
+      _id: "d1", name: "Front desk", revision: 7, kioskEnabled: true, enrolledAt: 1, group: { _id: "g1", name: "Sales" },
+      presence: { online: true, since: 1, revoked: false }, outOfSupport: false, latestVersion: null, planState: null, report: null,
+      flags: { noGroup: false, revoked: false, rotateCredential: false }, lock: null,
+      failedInstalls: { count: 0, more: false, names: [] }, network: { wifiFailed: 0, printersFailed: 0 },
+    };
+    cx.results["fleet:liveness"] = { lastContactAt: Date.now(), online: true, fastUntil: null };
+    cx.fns["fleet:watch"] = async () => ({ fastUntil: null });
+    cx.pages["fleet:installs"] = [];
+    ui(<DeviceDetail />, "admin", "/devices/d1?tab=apps");
+    expect(await screen.findByText(deviceText.appsNone)).toBeTruthy();
+    expect(screen.getByRole("link", { name: deviceText.appsOpenGroup }).getAttribute("href")).toBe("/groups/g1");
+    cleanup();
+    ui(<DeviceDetail />, "viewer", "/devices/d1?tab=apps");
+    expect(await screen.findByText(deviceText.appsNone)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: deviceText.appsOpenGroup })).toBeNull();
+  });
+});
 describe("Settings, Signing: publish again and the waiting roster update (keys:status, keys:registerActive)", () => {
   const keys = (over: Record<string, unknown> = {}) => ({
     keys: [{ keyId: "a3f19c07d2e8b456", fingerprint: "SHA256:abc", status: "active", createdAt: 1 }],
     signing: "ok",
     env: { active: { keyId: "a3f19c07d2e8b456", fingerprint: "SHA256:abc" }, next: null },
+    orgKeys: { signing: null, sealing: null, locked: false },
     publishFailedAt: null,
     rosterPending: false,
     ...over,
@@ -575,5 +609,94 @@ describe("Settings, Signing: publish again and the waiting roster update (keys:s
     ui(<SigningTab />, "owner", "/");
     expect(screen.queryByText(strings.publish.rosterTitle)).toBeNull();
     expect(screen.queryByRole("button", { name: strings.publish.again })).toBeNull();
+  });
+});
+
+import { settingsStrings as signText } from "../lib/screenStrings/settings";
+
+describe("Settings, Signing: who holds the key (keys:status orgKeys)", () => {
+  const sg = signText.signing;
+  const key = { keyId: "a3f19c07d2e8b456", fingerprint: "SHA256:abc", status: "active", createdAt: Date.UTC(2026, 7, 1) };
+  const status = (over: Record<string, unknown> = {}) => ({
+    keys: [key],
+    signing: "ok",
+    env: { active: null, next: null },
+    orgKeys: { signing: { keyId: key.keyId, fingerprint: "SHA256:abc", origin: "generated" }, sealing: null, locked: false },
+    publishFailedAt: null,
+    rosterPending: false,
+    ...over,
+  });
+  const deployment = (over: Record<string, unknown> = {}) =>
+    status({ env: { active: { keyId: key.keyId, fingerprint: "SHA256:abc" }, next: null }, orgKeys: { signing: null, sealing: null, locked: false }, ...over });
+
+  it("an organization with its own key (keyring) is told signing is automatic, and sees no environment warning, no commands and no rotation", () => {
+    cx.results["keys:status"] = status();
+    ui(<SigningTab />, "owner", "/");
+    expect(screen.getByText(sg.statusKeyring)).toBeTruthy();
+    expect(screen.getAllByText(sg.statusOn).length).toBeGreaterThan(0);
+    expect(screen.queryByText(sg.envMissing)).toBeNull();
+    expect(screen.queryByText(sg.setupTitle)).toBeNull();
+    expect(screen.queryByText(sg.rotateTitle)).toBeNull();
+    expect(screen.queryByRole("button", { name: sg.prepare })).toBeNull();
+    // The key is listed, but only under Advanced.
+    const details = screen.getByText(sg.keyDetails).closest("details")!;
+    expect(details.hasAttribute("open")).toBe(false);
+    expect(within(details).getByText(key.keyId)).toBeTruthy();
+  });
+
+  it("a locked keyring is a danger notice for everyone, in plain words", () => {
+    cx.results["keys:status"] = status({ orgKeys: { signing: { keyId: key.keyId, fingerprint: "f", origin: "generated" }, sealing: null, locked: true } });
+    ui(<SigningTab />, "viewer", "/");
+    expect(screen.getByText(sg.lockedTitle)).toBeTruthy();
+    expect(screen.getByText(sg.lockedBody)).toBeTruthy();
+    expect(screen.getByText(sg.statusOff)).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("an organization that signs with the deployment key sees its status line, the rotation under Advanced and, for an Owner, Prepare rotation", () => {
+    cx.results["keys:status"] = deployment();
+    ui(<SigningTab />, "owner", "/");
+    expect(screen.getByText(sg.statusDeployment)).toBeTruthy();
+    const rotate = screen.getByText(sg.rotateTitle).closest("details")!;
+    expect(rotate.hasAttribute("open")).toBe(false);
+    expect(within(rotate).getByRole("button", { name: sg.prepare })).toBeTruthy();
+  });
+
+  it("deployment key missing from the server: the environment warning shows, only there", () => {
+    cx.results["keys:status"] = deployment({ env: { active: null, next: null } });
+    ui(<SigningTab />, "owner", "/");
+    expect(screen.getByText(sg.envMissing)).toBeTruthy();
+  });
+
+  it("deployment, no key yet: an Owner gets the setup commands (open) and Register key; a viewer neither", () => {
+    cx.results["keys:status"] = deployment({ keys: [], signing: "missing" });
+    ui(<SigningTab />, "owner", "/");
+    expect(screen.getByText(sg.noKeyTitle)).toBeTruthy();
+    expect(screen.getByRole("button", { name: sg.register })).toBeTruthy();
+    expect(screen.getByText(sg.setupTitle).closest("details")!.hasAttribute("open")).toBe(true);
+    cleanup();
+    ui(<SigningTab />, "viewer", "/");
+    expect(screen.getByText(sg.noKeyTitle)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: sg.register })).toBeNull();
+    expect(screen.queryByText(sg.setupTitle)).toBeNull();
+  });
+
+  it("a mismatching deployment key is a danger notice (deployment only); a keyring organization never sees it", () => {
+    cx.results["keys:status"] = deployment({ signing: "mismatch" });
+    ui(<SigningTab />, "owner", "/");
+    expect(screen.getByText(sg.mismatchTitle)).toBeTruthy();
+    cleanup();
+    cx.results["keys:status"] = status({ signing: "mismatch" });
+    ui(<SigningTab />, "owner", "/");
+    expect(screen.queryByText(sg.mismatchTitle)).toBeNull();
+  });
+
+  it("'If something goes wrong' is under Advanced, in two short parts", () => {
+    cx.results["keys:status"] = status();
+    ui(<SigningTab />, "admin", "/");
+    const wrong = screen.getByText(sg.wrongTitle).closest("details")!;
+    expect(wrong.hasAttribute("open")).toBe(false);
+    expect(within(wrong).getByText(sg.lostBody)).toBeTruthy();
+    expect(within(wrong).getByText(sg.stolenBody)).toBeTruthy();
   });
 });

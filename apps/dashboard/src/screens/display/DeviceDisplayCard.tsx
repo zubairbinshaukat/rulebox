@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button, NativeSelect } from "@rulebox/ui";
 import { useSetDeviceDisplayMode } from "../../data";
-import type { DeviceDetail, DisplayChoice } from "../../data/types";
+import type { DevicePage, DisplayChoice } from "../../data/types";
 import { Card } from "../../components/Card";
 import { Field } from "../../components/Field";
 import { InlineNotice } from "../../components/Notice";
@@ -16,7 +16,11 @@ import { standardOnSmallPc } from "./rules";
 const modeName = (m: DisplayChoice) => (m === "lite" ? s.modeLite : m === "standard" ? s.modeStandard : s.modeAuto);
 
 /** This PC's own display mode (`fleet:setDisplayMode`). Wins over the group's; `auto` hands it back to the group. */
-export function DeviceDisplayCard({ d }: { d: DeviceDetail }) {
+/** What the card reads of a PC (the device page and the old detail both have it); an older server has no display fields. */
+export type DisplayTarget = Pick<DevicePage, "_id" | "revision" | "revoked"> &
+  Partial<Pick<DevicePage, "displayMode" | "groupDisplayMode">> & { report?: { ramMb?: number } | null };
+
+export function DeviceDisplayCard({ d }: { d: DisplayTarget }) {
   const set = useSetDeviceDisplayMode();
   const toast = useToast();
   const saved = d.displayMode ?? "auto";

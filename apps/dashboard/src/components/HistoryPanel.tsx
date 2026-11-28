@@ -38,7 +38,7 @@ export function HistoryPanel({ targetId, title = deviceStrings.history }: { targ
           </span>
         ),
       },
-      { key: "at", header: auditStrings.colTime, sortable: true, sortDefaultDir: "desc", cell: (e) => <RelativeTime ms={e.at} /> },
+      { key: "at", header: auditStrings.colTime, type: "date", sortable: true, sortDefaultDir: "desc", cell: (e) => <RelativeTime ms={e.at} /> },
     ],
     [],
   );

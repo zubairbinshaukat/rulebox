@@ -8,7 +8,11 @@ import type { Me } from "../data/types";
 import { MeContext } from "../lib/member";
 import { setStepUpHandler } from "../lib/stepUpRetry";
 import { strings } from "../lib/strings";
+import { pickOption, selectedText } from "../test/select";
 import { deviceStrings } from "../lib/screenStrings/device";
+import { deviceText } from "./device/strings";
+import { problemStrings, COMPAT_RULES, COMPAT_WARNING_FALLBACK } from "./device/problemStrings";
+import { lockStrings } from "./broadcasts/strings";
 import { devicesStrings } from "../lib/screenStrings/devices";
 
 // Phase 4 Step 7 screens (Devices, DeviceDetail) against the LIVE data seam
@@ -110,26 +114,24 @@ const row = (id: string, name: string, over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const detail = (over: Record<string, unknown> = {}) => ({
+const page = (over: Record<string, unknown> = {}) => ({
   _id: "d1",
   name: "Front desk",
   revision: 7,
   kioskEnabled: true,
   enrolledAt: Date.now() - 5 * HOUR,
   group: { _id: "g1", name: "Sales" },
-  state: "active",
   presence: { online: true, since: 1, revoked: false },
-  summary: { agentVersion: "0.4.0", outOfSupport: false, updatedAt: 1 },
-  report: { agentVersion: "0.4.0", os: "Windows 11", osBuild: "26100", updatedAt: Date.now() - 60_000 },
-  versions: [],
+  outOfSupport: false,
+  latestVersion: 3,
+  planState: "ok",
+  report: { agentVersion: "0.4.0", os: "Windows 11", osBuild: "26100", appliedVersion: 3, updatedAt: Date.now() - 60_000 },
   flags: { noGroup: false, revoked: false, rotateCredential: false },
-  groups: [
-    { _id: "g1", name: "Sales" },
-    { _id: "g2", name: "Back office" },
-  ],
+  lock: null,
+  failedInstalls: { count: 0, more: false, names: [] },
+  network: { wifiFailed: 0, printersFailed: 0 },
   ...over,
 });
-
 beforeEach(() => {
   cx.results = {};
   cx.pages = {};
@@ -272,17 +274,21 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
     expect(screen.getByText(strings.table.byRelevance)).toBeTruthy();
   });
 
-  it("keeps the page, page size, sort, search and group in the URL and reads them back; invalid values fall back to the defaults", () => {
+  it("keeps the page, page size, sort, search and group in the URL and reads them back; invalid values fall back to the defaults", async () => {
     cx.results["groups:list"] = [GROUP];
-    cx.results["fleet:list"] = listPage([row("d1", "Front desk")]);
+    cx.results["fleet:list"] = listPage([row("d1", "Front desk")], { isDone: false });
     ui(<Devices />, "viewer", "/devices?size=25&sort=name&dir=desc&group=g1");
     expect(listArgs()).toEqual({ paginationOpts: { numItems: 25, cursor: null }, groupId: "g1", sort: { key: "name", dir: "desc" } });
-    expect((screen.getByLabelText(strings.pager.rowsPerPage) as HTMLSelectElement).value).toBe("25");
+    await screen.findByLabelText(strings.pager.rowsPerPage);
+    expect(selectedText(strings.pager.rowsPerPage)).toBe("25");
     cleanup();
     cx.queries = [];
+    // More rows follow, so the pager (with its size select) shows.
+    cx.results["fleet:list"] = listPage([row("d1", "Front desk")], { isDone: false });
     ui(<Devices />, "viewer", "/devices?size=7&sort=bogus&dir=sideways&page=-3");
     expect(listArgs()).toEqual(DEFAULT_ARGS);
-    expect((screen.getByLabelText(strings.pager.rowsPerPage) as HTMLSelectElement).value).toBe("10");
+    await screen.findByLabelText(strings.pager.rowsPerPage);
+    expect(selectedText(strings.pager.rowsPerPage)).toBe("10");
   });
 
   it("a header click sorts on the server (name first A-Z, then Z-A); the active column says so with aria-sort", async () => {
@@ -327,7 +333,8 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
     expect(screen.getByText(`${strings.pager.records(524)} · ${strings.pager.pageOf(1, 53)}`)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     await waitFor(() => expect(listArgs().paginationOpts.cursor).toBe("cur-2"));
-    fireEvent.change(screen.getByLabelText(strings.pager.rowsPerPage), { target: { value: "25" } });
+    await screen.findByLabelText(strings.pager.rowsPerPage); // the dropdown is a lazy chunk
+    pickOption(strings.pager.rowsPerPage, "25");
     await waitFor(() => expect(listArgs().paginationOpts).toEqual({ numItems: 25, cursor: null }));
     fireEvent.click(screen.getByRole("button", { name: strings.pager.next }));
     await waitFor(() => expect(listArgs().paginationOpts.cursor).toBe("cur-2"));
@@ -362,16 +369,17 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
     expect(await screen.findByText("detail page")).toBeTruthy();
   });
 
-  it("the cards view draws the same rows as cards, with a sort select", () => {
+  it("the cards view draws the same rows as cards, with a sort select", async () => {
     cx.results["groups:list"] = [];
     cx.results["fleet:list"] = listPage([row("d1", "Front desk")]);
     ui(<Devices />, "viewer", "/devices");
     fireEvent.click(screen.getByRole("radio", { name: strings.table.viewCards }));
     expect(document.documentElement.getAttribute("data-view")).toBe("cards");
+    expect(await screen.findByRole("list", { name: devicesStrings.title })).toBeTruthy();
     expect(screen.queryByRole("region", { name: devicesStrings.title })).toBeNull();
     expect(screen.getByRole("link", { name: "Front desk" })).toBeTruthy();
-    const select = screen.getByLabelText(strings.table.sortSelect) as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "name:asc" } });
+    await screen.findByLabelText(strings.table.sortSelect);
+    pickOption(strings.table.sortSelect, "Name: A to Z");
     expect(listArgs().sort).toEqual({ key: "name", dir: "asc" });
   });
 
@@ -433,134 +441,163 @@ describe("Devices (fleet:list, one server-driven page at a time)", () => {
   });
 });
 
-describe("DeviceDetail (fleet:get)", () => {
-  const open = (role: Me["role"] = "admin") => ui(<DeviceDetail />, role, "/devices/d1");
+describe("DeviceDetail (fleet:page)", () => {
+  const open = (role: Me["role"] = "admin", path = "/devices/d1") => ui(<DeviceDetail />, role, path);
+  const live = (lastContactAt: number | null = Date.now() - 20_000) => {
+    cx.results["fleet:liveness"] = { lastContactAt, online: true, fastUntil: null };
+  };
+  const report = (over: Record<string, unknown> = {}) => ({ agentVersion: "0.4.0", os: "Windows 11", osBuild: "26100", appliedVersion: 3, updatedAt: Date.now() - 60_000, ...over });
+  beforeEach(() => {
+    cx.fns["fleet:watch"] = vi.fn(async () => ({ fastUntil: null }));
+  });
 
-  it("shows the PC, its last contact and asks for watch mode while visible", async () => {
-    cx.results["fleet:get"] = detail();
-    cx.results["fleet:liveness"] = { lastContactAt: Date.now() - 20_000, online: true, fastUntil: null };
+  it("shows the PC, its state and what it is, and asks for watch mode while visible", async () => {
+    cx.results["fleet:page"] = page();
+    live();
     const watch = vi.fn(async () => ({ fastUntil: Date.now() + 300_000 }));
     cx.fns["fleet:watch"] = watch;
     open();
     expect(screen.getByRole("heading", { level: 1, name: "Front desk" })).toBeTruthy();
-    expect(screen.getByText(deviceStrings.lastContact)).toBeTruthy();
+    expect(screen.getByText(deviceText.onlineAgo(deviceText.justNow))).toBeTruthy();
+    expect(screen.getByText(deviceText.kioskWaiting)).toBeTruthy();
+    const meta = within(screen.getByRole("list", { name: deviceText.metaLabel }));
+    expect(meta.getByRole("link", { name: "Sales" }).getAttribute("href")).toBe("/groups/g1");
+    expect(meta.getByText("Windows 11")).toBeTruthy();
+    expect(meta.getByText(deviceText.rulebox("0.4.0"))).toBeTruthy();
     await waitFor(() => expect(watch).toHaveBeenCalledWith({ deviceId: "d1" }));
   });
 
-  it("lists the signing keys the PC trusts; reported empty it warns, reported nothing (older agent) it shows a dash and no warning", () => {
-    cx.fns["fleet:watch"] = vi.fn(async () => ({ fastUntil: null }));
-    cx.results["fleet:liveness"] = { lastContactAt: Date.now() - 20_000, online: true, fastUntil: null };
-    const withKeys = (trustedKeyIds?: string[]) => detail({ report: { agentVersion: "0.4.0", os: "Windows 11", osBuild: "26100", updatedAt: Date.now() - 60_000, trustedKeyIds } });
-    cx.results["fleet:get"] = withKeys(["a3f19c07d2e8b456", "00112233445566ff"]);
+  it("an up-to-date, healthy PC says nothing needs attention; the tiles say why", () => {
+    cx.results["fleet:page"] = page({ report: report({ kioskPhase: "applied" }) });
+    live();
     open();
-    expect(screen.getByText(deviceStrings.trustedKeys)).toBeTruthy();
-    expect(screen.getByText("a3f19c07d2e8b456")).toBeTruthy();
-    expect(screen.getByText("00112233445566ff")).toBeTruthy();
-    expect(screen.queryByText(deviceStrings.noTrustedKeyTitle)).toBeNull();
-    cleanup();
-    cx.results["fleet:get"] = withKeys([]);
-    open();
-    expect(screen.getByText(deviceStrings.noTrustedKeyTitle)).toBeTruthy();
-    expect(screen.getByText(deviceStrings.trustedKeysNone)).toBeTruthy();
-    cleanup();
-    cx.results["fleet:get"] = withKeys(undefined);
-    open();
-    expect(screen.queryByText(deviceStrings.noTrustedKeyTitle)).toBeNull();
+    expect(screen.getByText(deviceText.allClear)).toBeTruthy();
+    const tiles = within(screen.getByRole("list", { name: deviceText.tilesLabel }));
+    expect(tiles.getByText(deviceText.tile.upToDate)).toBeTruthy();
+    expect(tiles.getByText(deviceText.tile.noFailures)).toBeTruthy();
+    expect(screen.getByText(deviceText.kioskOn)).toBeTruthy();
   });
 
-  describe("compatibility card (Phase 6 Step 6)", () => {
+  it("lists the signing keys the PC trusts in the technical details; reported empty it is a problem, reported nothing (older agent) it is not", () => {
+    live();
+    const withKeys = (trustedKeyIds?: string[]) => page({ report: report({ trustedKeyIds }) });
+    cx.results["fleet:page"] = withKeys(["a3f19c07d2e8b456", "00112233445566ff"]);
+    open();
+    expect(screen.getByText(deviceText.techKeys)).toBeTruthy();
+    expect(screen.getByText("a3f19c07d2e8b456, 00112233445566ff")).toBeTruthy();
+    expect(screen.queryByText(problemStrings.untrusted.title)).toBeNull();
+    cleanup();
+    cx.results["fleet:page"] = withKeys([]);
+    open();
+    expect(screen.getByText(problemStrings.untrusted.title)).toBeTruthy();
+    expect(screen.getAllByText(deviceText.techKeysNone).length).toBeGreaterThanOrEqual(1);
+    cleanup();
+    cx.results["fleet:page"] = withKeys(undefined);
+    open();
+    expect(screen.queryByText(problemStrings.untrusted.title)).toBeNull();
+    expect(screen.queryByText(deviceText.techKeys)).toBeNull();
+  });
+
+  describe("what the compatibility report says (Phase 6 Step 6)", () => {
     const os = { build: 26100, ubr: 1, displayVersion: "24H2", editionId: "Professional", productType: 1, arch: "x86_64", sMode: false, domainJoined: false, entraJoined: false, ramMb: 8192, systemDiskFreeGb: 50 };
     const withCompat = (compat: Record<string, unknown>) => {
-      cx.fns["fleet:watch"] = vi.fn(async () => ({ fastUntil: null }));
-      cx.results["fleet:liveness"] = { lastContactAt: Date.now() - 20_000, online: true, fastUntil: null };
-      cx.results["fleet:get"] = detail({ report: { agentVersion: "0.4.0", os: "Windows 11", osBuild: "26100", updatedAt: Date.now() - 60_000, compat } });
+      live();
+      cx.results["fleet:page"] = page({ report: report({ compat }) });
     };
-    const card = () => within(screen.getByRole("region", { name: deviceStrings.compat }));
 
-    it("shows Full protection, the WebView2 version and the browsers found", () => {
+    it("tells the Windows edition, the browsers found and the WebView2 version (in the technical details)", () => {
       withCompat({
         os, blockers: [], warnings: [], liteMode: false,
         webview2: { present: true, version: "131.0.2903.51", source: "machine" },
         protection: "full", layers: { appLocker: true, appControl: true },
         browsers: { edge: true, chrome: true }, protectedPrint: false, lowRam: false,
       });
-      ui(<DeviceDetail />, "admin", "/devices/d1");
-      expect(card().getByText(deviceStrings.protection)).toBeTruthy();
-      expect(card().getByText(deviceStrings.protectionFull)).toBeTruthy();
-      expect(card().queryByText(deviceStrings.reducedTitle)).toBeNull();
-      expect(card().getByText("131.0.2903.51")).toBeTruthy();
-      expect(card().getByText("Edge, Chrome")).toBeTruthy();
-      expect(card().getByText(deviceStrings.noIssues)).toBeTruthy();
+      open();
+      const about = within(screen.getByRole("region", { name: deviceText.about }));
+      expect(about.getByText("Windows 11 Pro, 24H2")).toBeTruthy();
+      expect(about.getByText("Edge, Chrome")).toBeTruthy();
+      expect(about.getByText("8 GB")).toBeTruthy();
+      expect(about.getByText("131.0.2903.51")).toBeTruthy();
+      expect(screen.getByText(deviceText.allClear)).toBeTruthy();
+      expect(screen.queryByText(deviceText.companyDomain)).toBeNull();
     });
 
-    it("shows Reduced protection with the missing layers, a missing WebView2 and the warnings in words", () => {
+    it("turns warnings into problems in words (an unknown code gets the generic title), Home as Home, and Reduced into a Protection notice", async () => {
       withCompat({
-        os: { ...os, editionId: "CoreSingleLanguage" }, blockers: [], warnings: ["webview2_missing", "protected_print_on", "future_code"], liteMode: true,
+        os: { ...os, editionId: "CoreSingleLanguage", domainJoined: true }, blockers: [], warnings: ["webview2_missing", "protected_print_on", "future_code"], liteMode: true,
         webview2: { present: false, version: null, source: "none" },
         protection: "reduced", layers: { appLocker: false, appControl: true },
         browsers: { edge: false, chrome: false }, protectedPrint: true, lowRam: false,
       });
-      ui(<DeviceDetail />, "admin", "/devices/d1");
-      expect(card().getByText(deviceStrings.protectionReduced)).toBeTruthy();
-      expect(card().getByText(deviceStrings.reducedTitle)).toBeTruthy();
-      expect(card().getByText(deviceStrings.reducedDetail([deviceStrings.layerAppLocker]))).toBeTruthy();
-      expect(card().getByText(deviceStrings.webview2Missing)).toBeTruthy();
-      expect(card().getByText(deviceStrings.browsersNone)).toBeTruthy();
-      const words = [deviceStrings.compatCode("webview2_missing"), deviceStrings.compatCode("protected_print_on"), "future_code"].join(" ");
-      expect(card().getByText(words)).toBeTruthy();
-      // A warning is not a blocker: no blocker notice, no "no issues".
-      expect(card().queryByText(deviceStrings.blockers)).toBeNull();
-      expect(card().queryByText(deviceStrings.noIssues)).toBeNull();
+      open();
+      expect(screen.getByText(COMPAT_RULES.webview2_missing!.title)).toBeTruthy();
+      expect(screen.getByText(COMPAT_RULES.protected_print_on!.title)).toBeTruthy();
+      expect(screen.getByText(COMPAT_WARNING_FALLBACK.title)).toBeTruthy();
+      // The raw code is for support only: in the technical details, never in a title.
+      expect(screen.getAllByText("future_code").length).toBeGreaterThanOrEqual(1);
+      const about = within(screen.getByRole("region", { name: deviceText.about }));
+      expect(about.getByText("Windows 11 Home, 24H2")).toBeTruthy();
+      expect(about.getByText(deviceText.browsersNone)).toBeTruthy();
+      expect(about.getByText(deviceText.companyDomain)).toBeTruthy();
+      expect(about.getByText(new RegExp(deviceText.lite))).toBeTruthy();
+      expect(screen.queryByText(deviceText.allClear)).toBeNull();
+      fireEvent.click(screen.getByRole("tab", { name: /Protection/ }));
+      expect(await screen.findByText(deviceStrings.reducedTitle)).toBeTruthy();
+      expect(screen.getByText(deviceStrings.reducedDetail([deviceStrings.layerAppLocker]))).toBeTruthy();
     });
 
-    it("an older agent's report (no Phase 6 fields) shows dashes, never a wrong level", () => {
+    it("an older agent's report (no Phase 6 fields) shows no browsers row and no notice, never a wrong value", async () => {
       withCompat({ os, blockers: [], warnings: [], liteMode: false });
-      ui(<DeviceDetail />, "admin", "/devices/d1");
-      expect(card().getByText(deviceStrings.protectionNotReported)).toBeTruthy();
-      expect(card().queryByText(deviceStrings.protectionFull)).toBeNull();
-      expect(card().queryByText(deviceStrings.reducedTitle)).toBeNull();
-      expect(card().getAllByText(deviceStrings.notReported)).toHaveLength(2);
+      open();
+      expect(screen.queryByText(deviceText.browsers)).toBeNull();
+      fireEvent.click(screen.getByRole("tab", { name: /Protection/ }));
+      // The lockdown cards (still the old ones) are the tab's content; they say loading until their query answers.
+      await screen.findAllByText(strings.app.loading);
+      expect(screen.queryByText(deviceStrings.reducedTitle)).toBeNull();
     });
 
-    it("a blocker after the WebView2 install attempt is shown as a blocker", () => {
+    it("a blocker after the WebView2 install attempt is a red problem", () => {
       withCompat({ os, blockers: ["webview2_too_old"], warnings: [], liteMode: false, webview2: { present: true, version: "124.0.1", source: "machine" } });
-      ui(<DeviceDetail />, "admin", "/devices/d1");
-      expect(card().getByText(deviceStrings.blockers)).toBeTruthy();
-      expect(card().getByText(deviceStrings.compatCode("webview2_too_old"))).toBeTruthy();
+      open();
+      const card = screen.getByText(COMPAT_RULES.webview2_too_old!.title).closest("article") as HTMLElement;
+      expect(card.getAttribute("data-severity")).toBe("danger");
     });
   });
 
-  it("subscribes to liveness next to fleet:get, and a PC that pinged but never reported still shows its last contact", () => {
-    // fleet:get has not answered yet: liveness is already requested (no waterfall).
-    cx.results["fleet:liveness"] = { lastContactAt: Date.now() - 20_000, online: true, fastUntil: null };
+  it("subscribes to liveness next to fleet:page, and a PC that pinged but never reported still says so", () => {
+    // fleet:page has not answered yet: liveness is already requested (no waterfall).
+    live();
     open();
     expect(cx.queried).toContain("fleet:liveness");
-
-    cx.results["fleet:get"] = detail({ report: null });
-    cx.fns["fleet:watch"] = vi.fn(async () => ({ fastUntil: null }));
     cleanup();
+
+    cx.results["fleet:page"] = page({ report: null });
     open();
-    expect(screen.getByText(deviceStrings.lastContact)).toBeTruthy();
-    expect(screen.queryByText(strings.common.neverSeen)).toBeNull();
-    // The report-less Status card and the Compatibility card both say there is no report yet.
-    expect(screen.getAllByText(deviceStrings.compatNone)).toHaveLength(2);
+    expect(screen.getByText(deviceText.noReport)).toBeTruthy();
+    expect(screen.queryByText(problemStrings.neverSeen.title)).toBeNull();
+    cleanup();
+    // The server says this PC never called in: a note with the way to add it.
+    live(null);
+    open();
+    expect(screen.getByText(problemStrings.neverSeen.title)).toBeTruthy();
+    expect(screen.getByRole("link", { name: problemStrings.neverSeen.action }).getAttribute("href")).toBe("/enrollment");
   });
 
-  it("shows a dash, not 'Not seen yet', when the liveness query fails; 'Not seen yet' when it says never", () => {
-    cx.results["fleet:get"] = detail();
-    cx.fns["fleet:watch"] = vi.fn(async () => ({ fastUntil: null }));
+  it("shows 'Offline', not 'Not connected yet', when the liveness query fails; 'Not connected yet' when it says never", () => {
+    cx.results["fleet:page"] = page({ presence: { online: false, since: null, revoked: false }, report: null });
     cx.results["fleet:liveness"] = new ConvexError({ code: "internal" });
     open();
-    expect(screen.queryByText(strings.common.neverSeen)).toBeNull();
+    expect(screen.queryByText(deviceText.notConnected)).toBeNull();
+    expect(screen.getByText(deviceText.offline)).toBeTruthy();
     cleanup();
     cx.results["fleet:liveness"] = { lastContactAt: null, online: false, fastUntil: null };
     open();
-    expect(screen.getByText(strings.common.neverSeen)).toBeTruthy();
+    expect(screen.getByText(deviceText.notConnected)).toBeTruthy();
   });
 
   it("renews watch mode every 4 minutes and stops when the page closes", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    cx.results["fleet:get"] = detail();
+    cx.results["fleet:page"] = page();
     const watch = vi.fn(async () => ({ fastUntil: null }));
     cx.fns["fleet:watch"] = watch;
     const view = open();
@@ -576,75 +613,123 @@ describe("DeviceDetail (fleet:get)", () => {
     expect(watch).toHaveBeenCalledTimes(2);
   });
 
-  it("a revoked PC is not watched and offers Remove", () => {
-    cx.results["fleet:get"] = detail({ state: "revoked", presence: { online: false, since: 5, revoked: true }, flags: { noGroup: false, revoked: true, rotateCredential: false } });
+  it("a disconnected PC is not watched, says so, and its action leads to Remove", async () => {
+    cx.results["fleet:page"] = page({ revoked: true, presence: { online: false, since: 5, revoked: true }, flags: { noGroup: false, revoked: true, rotateCredential: false } });
     const watch = vi.fn(async () => ({ fastUntil: null }));
     cx.fns["fleet:watch"] = watch;
     open();
     expect(watch).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: strings.common.remove })).toBeTruthy();
+    expect(screen.getByText(problemStrings.revoked.title)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: deviceText.lockPc })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: problemStrings.revoked.action }));
+    expect(await screen.findByRole("button", { name: strings.common.remove })).toBeTruthy();
   });
 
-  it("warns when the PC has no group", () => {
-    cx.results["fleet:get"] = detail({ group: null, flags: { noGroup: true, revoked: false, rotateCredential: false } });
-    cx.fns["fleet:watch"] = vi.fn(async () => ({ fastUntil: null }));
-    open();
-    expect(screen.getByText(deviceStrings.noGroupWarning)).toBeTruthy();
-  });
-
-  it("kiosk off sends the revision, and the fresh step-up dialog is retried once", async () => {
-    cx.results["fleet:get"] = detail();
-    cx.fns["fleet:watch"] = vi.fn(async () => ({ fastUntil: null }));
-    const setKiosk = vi
-      .fn()
-      .mockRejectedValueOnce(new ConvexError({ code: "step_up_required" }))
-      .mockResolvedValueOnce({ revision: 8 });
+  it("warns when the PC has no group, and offers to turn kiosk mode back on in one click", async () => {
+    cx.results["fleet:page"] = page({ group: null, kioskEnabled: false, flags: { noGroup: true, revoked: false, rotateCredential: false } });
+    const setKiosk = vi.fn(async () => ({ revision: 8 }));
     cx.fns["fleet:setKiosk"] = setKiosk;
-    const handler = vi.fn(async () => true);
-    const off = setStepUpHandler(handler);
     open();
-    fireEvent.click(screen.getByRole("switch"));
-    await waitFor(() => expect(setKiosk).toHaveBeenCalledTimes(2));
-    expect(setKiosk).toHaveBeenLastCalledWith({ deviceId: "d1", expectedRevision: 7, enabled: false });
-    expect(handler).toHaveBeenCalledOnce();
-    off();
+    expect(screen.getByText(problemStrings.noGroup.title)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: problemStrings.kioskOff.action }));
+    await waitFor(() => expect(setKiosk).toHaveBeenCalledWith({ deviceId: "d1", expectedRevision: 7, enabled: true }));
   });
 
-  it("revoke needs the PC's name typed, then calls fleet:revoke", async () => {
-    cx.results["fleet:get"] = detail();
-    cx.fns["fleet:watch"] = vi.fn(async () => ({ fastUntil: null }));
-    const revoke = vi.fn(async () => null);
-    cx.fns["fleet:revoke"] = revoke;
-    open();
-    fireEvent.click(screen.getByRole("button", { name: deviceStrings.revoke }));
-    const dialog = screen.getByRole("dialog");
-    const confirm = within(dialog).getByRole("button", { name: deviceStrings.revoke });
-    expect((confirm as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Front desk" } });
-    fireEvent.click(confirm);
-    await waitFor(() => expect(revoke).toHaveBeenCalledWith({ deviceId: "d1" }));
-  });
-
-  it("move sends the revision; a viewer sees no actions; an unknown PC says not found", async () => {
-    cx.results["fleet:get"] = detail();
-    cx.fns["fleet:watch"] = vi.fn(async () => ({ fastUntil: null }));
-    const move = vi.fn(async () => ({ revision: 8 }));
-    cx.fns["fleet:move"] = move;
-    const view = open();
-    // (Phase 5 Step 19 added the ring and "Allow USB" selects: the group picker is named.)
-    fireEvent.change(screen.getByLabelText(deviceStrings.group), { target: { value: "g2" } });
-    fireEvent.click(screen.getByRole("button", { name: deviceStrings.move }));
-    await waitFor(() => expect(move).toHaveBeenCalledWith({ deviceId: "d1", expectedRevision: 7, groupId: "g2" }));
-    view.unmount();
-
+  it("a viewer sees every problem but no button that runs something, no header actions and no rename", () => {
+    cx.results["fleet:page"] = page({ kioskEnabled: false });
     open("viewer");
-    expect(screen.queryByRole("switch")).toBeNull();
-    expect(screen.queryByRole("button", { name: deviceStrings.revoke })).toBeNull();
-    expect(screen.queryByRole("button", { name: strings.common.rename })).toBeNull();
+    expect(screen.getByText(problemStrings.kioskOff.title)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: problemStrings.kioskOff.action })).toBeNull();
+    expect(screen.queryByRole("button", { name: deviceText.sendMessage })).toBeNull();
+    expect(screen.queryByRole("button", { name: deviceText.lockPc })).toBeNull();
+    expect(screen.queryByRole("button", { name: deviceText.rename })).toBeNull();
+  });
+
+  it("Lock this PC (header) opens the lock form and sends the message", async () => {
+    cx.results["fleet:page"] = page();
+    const lock = vi.fn(async () => ({ lockId: "l1" }));
+    cx.fns["fleet:lock"] = lock;
+    open();
+    fireEvent.click(screen.getByRole("button", { name: deviceText.lockPc }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(new RegExp(lockStrings.message)), { target: { value: "Back in five minutes" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: lockStrings.lock }));
+    await waitFor(() => expect(lock).toHaveBeenCalledWith({ deviceId: "d1", message: "Back in five minutes" }));
+  });
+
+  it("a locked PC shows Locked, a danger problem with Unlock, and the header offers the same", async () => {
+    cx.results["fleet:page"] = page({ lock: { lockId: "l1", message: "Back soon", lockedAt: Date.now() - 60_000 } });
+    const unlock = vi.fn(async () => null);
+    cx.fns["fleet:unlock"] = unlock;
+    open();
+    expect(screen.getByText(deviceText.locked)).toBeTruthy();
+    expect(screen.getByText(problemStrings.locked.title)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: problemStrings.locked.action }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: lockStrings.unlock }));
+    await waitFor(() => expect(unlock).toHaveBeenCalledWith({ deviceId: "d1" }));
+  });
+
+  describe("Settings tab (today's cards, until step 9 rebuilds it)", () => {
+    const settings = () => open("admin", "/devices/d1?tab=settings");
+    const options = { groups: [{ _id: "g1", name: "Sales" }, { _id: "g2", name: "Back office" }], rolloutRevision: 0 };
+
+    it("kiosk off sends the revision, and the fresh step-up dialog is retried once", async () => {
+      cx.results["fleet:page"] = page();
+      cx.results["fleet:deviceSettings"] = options;
+      const setKiosk = vi
+        .fn()
+        .mockRejectedValueOnce(new ConvexError({ code: "step_up_required" }))
+        .mockResolvedValueOnce({ revision: 8 });
+      cx.fns["fleet:setKiosk"] = setKiosk;
+      const handler = vi.fn(async () => true);
+      const off = setStepUpHandler(handler);
+      settings();
+      fireEvent.click(await screen.findByRole("switch"));
+      await waitFor(() => expect(setKiosk).toHaveBeenCalledTimes(2));
+      expect(setKiosk).toHaveBeenLastCalledWith({ deviceId: "d1", expectedRevision: 7, enabled: false });
+      expect(handler).toHaveBeenCalledOnce();
+      off();
+    });
+
+    it("disconnect needs the PC's name typed, then calls fleet:revoke", async () => {
+      cx.results["fleet:page"] = page();
+      cx.results["fleet:deviceSettings"] = options;
+      const revoke = vi.fn(async () => null);
+      cx.fns["fleet:revoke"] = revoke;
+      settings();
+      fireEvent.click(await screen.findByRole("button", { name: deviceStrings.revoke }));
+      const dialog = screen.getByRole("dialog");
+      const confirm = within(dialog).getByRole("button", { name: deviceStrings.revoke });
+      expect((confirm as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Front desk" } });
+      fireEvent.click(confirm);
+      await waitFor(() => expect(revoke).toHaveBeenCalledWith({ deviceId: "d1" }));
+    });
+
+    it("move sends the revision (the groups come from fleet:deviceSettings); a viewer sees no actions", async () => {
+      cx.results["fleet:page"] = page();
+      cx.results["fleet:deviceSettings"] = options;
+      const move = vi.fn(async () => ({ revision: 8 }));
+      cx.fns["fleet:move"] = move;
+      const view = settings();
+      fireEvent.change(await screen.findByLabelText(deviceStrings.group), { target: { value: "g2" } });
+      fireEvent.click(screen.getByRole("button", { name: deviceStrings.move }));
+      await waitFor(() => expect(move).toHaveBeenCalledWith({ deviceId: "d1", expectedRevision: 7, groupId: "g2" }));
+      view.unmount();
+
+      cx.queried = [];
+      open("viewer", "/devices/d1?tab=settings");
+      await screen.findByText(deviceStrings.identity);
+      expect(screen.queryByRole("switch")).toBeNull();
+      expect(screen.queryByRole("button", { name: deviceStrings.revoke })).toBeNull();
+      expect(screen.queryByRole("button", { name: deviceText.rename })).toBeNull();
+      // A viewer has no group picker, so the tab does not subscribe to the group list.
+      expect(cx.queried).not.toContain("fleet:deviceSettings");
+    });
   });
 
   it("an unknown PC is a visible error (not_found has no Try again), not a blank page", () => {
-    cx.results["fleet:get"] = new ConvexError({ code: "not_found" });
+    cx.results["fleet:page"] = new ConvexError({ code: "not_found" });
     open();
     expect(screen.getByRole("alert").textContent).toContain(strings.common.regionFailed);
     expect(screen.queryByRole("button", { name: strings.common.tryAgain })).toBeNull();
