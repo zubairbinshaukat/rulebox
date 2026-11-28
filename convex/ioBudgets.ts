@@ -39,6 +39,9 @@ export const IO_BUDGETS: Record<string, IoBudget> = {
   // The Settings → Updates card (viewer): the organization row (+ the member wrapper), no index, no list. Subscribed only while the tab is open.
   "ruleboxRelease:get": { maxReads: 4, maxReadBytes: 2_048, maxWrites: 0, maxWriteBytes: 0, live: true },
   "ruleboxRelease:set": { maxReads: 8, maxReadBytes: 4_096, maxWrites: 4, maxWriteBytes: 2_048 },
+  // UI pass (settings plan 5.2): authorize only (session, member, step-up row; worst case + memberships). The GitHub calls are outside
+  // the database and nothing is stored (module-level cache). Owner-only, on opening the Updates section or Refresh; never subscribed.
+  "ruleboxRelease:githubReleases": { maxReads: 4 + 20, maxReadBytes: 12_000, maxWrites: 0, maxWriteBytes: 0 },
 
   // ---- Step 5: groups. Counts per group read `.take(501)` of devices and
   // groupMembers (plan Step 5.11); a free tenant (3 groups, 2 devices, 25

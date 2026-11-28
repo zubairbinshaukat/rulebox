@@ -3,9 +3,14 @@
  * refusals, unchanged = no write and no audit entry).
  */
 import { useCallback } from "react";
-import { currentMember, checkRevision, fail, runMutation, useDemoQuery } from "../demo/store";
+import { currentMember, checkRevision, fail, runMutation, sleep, useDemoQuery } from "../demo/store";
 import { releaseSizeProblem, releaseUrlProblem, sha256Problem, versionProblem } from "../../screens/settings/releaseRules";
 import type { ReleaseApi, ReleaseInfo } from "./api";
+import { demoGithubReleasesResult, demoReleasesVariant } from "./demoReleases";
+import { useGithubReleasesRunner } from "./githubRunner";
+
+/** How long the fake GitHub call takes (so the loading state is visible). */
+export const DEMO_GITHUB_DELAY_MS = 500;
 
 const same = (a: ReleaseInfo | undefined, b: ReleaseInfo | undefined) =>
   a === undefined || b === undefined ? a === b : a.version === b.version && a.url === b.url && a.sha256 === b.sha256 && a.sizeBytes === b.sizeBytes;
@@ -55,6 +60,17 @@ export const demoReleaseApi: ReleaseApi = {
         "fresh",
       );
     }, []);
+  },
+  /** A fake list after 500 ms (owner only, like the server); `?demoReleases=empty|unavailable|rate|stale` shows the other states. */
+  useGithubReleases(enabled) {
+    const variant = demoReleasesVariant();
+    return useGithubReleasesRunner(enabled, `demo:${variant ?? "list"}`, async () => {
+      const me = currentMember();
+      if (!me) fail("unauthenticated");
+      if (me.status === "disabled" || me.role !== "owner") fail("forbidden");
+      await sleep(DEMO_GITHUB_DELAY_MS);
+      return demoGithubReleasesResult(variant);
+    });
   },
 };
 

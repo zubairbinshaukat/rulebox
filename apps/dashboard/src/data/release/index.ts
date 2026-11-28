@@ -7,4 +7,4 @@ import type { ReleaseApi } from "./api";
 
 const api: ReleaseApi = releaseApi;
 
-export const { useRelease, useSetRelease } = api;
+export const { useRelease, useSetRelease, useGithubReleases } = api;

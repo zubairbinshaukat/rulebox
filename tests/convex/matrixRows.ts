@@ -558,6 +558,20 @@ export const ROWS: Row[] = [
     call: (a) => a.mutation(api.ruleboxRelease.set, { expectedRevision: 0, release: null }),
     expect: { ...OWNER, foreign: "ok" },
   },
+  {
+    name: "ruleboxRelease:githubReleases",
+    // UI pass: owner, an UNLOCKED session (it only reads public data). GitHub is stubbed to answer no releases: no test touches the network.
+    call: async (a) => {
+      const real = globalThis.fetch;
+      globalThis.fetch = (async () => new Response("[]", { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+      try {
+        return await a.action(api.ruleboxRelease.githubReleases, {});
+      } finally {
+        globalThis.fetch = real;
+      }
+    },
+    expect: { ...OWNER, ownerStale: "ok", foreign: "ok" },
+  },
   { name: "groups:list", call: (a) => a.query(api.groups.list, {}), expect: { ...VIEWER, foreign: "ok" } },
   { name: "groups:page", call: (a) => a.query(api.groups.page, { paginationOpts: { numItems: 10, cursor: null } }), expect: { ...VIEWER, foreign: "ok" } },
   { name: "groups:get", call: (a, f) => a.query(api.groups.get, { groupId: f.groupId }), expect: { ...VIEWER, foreign: "not_found" } },

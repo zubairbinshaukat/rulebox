@@ -116,6 +116,7 @@ The seam of the Settings → Updates tab (`ReleaseApi` in `release/api.ts`, `rel
 |---|---|---|
 | `useRelease` | `api.ruleboxRelease.get` (viewer): `{ revision, release: { version, url, sha256, sizeBytes } \| null }`, one read of the organization row | live |
 | `useSetRelease` | `api.ruleboxRelease.set` (Owner, major: fresh step-up): `{ expectedRevision, release \| null }` → `{ revision }`; `stale_edit`; `invalid_argument` field `release.version` / `release.url` / `release.sha256` / `release.sizeBytes`; `null` clears | live |
+| `useGithubReleases(enabled)` | `useAction(api.ruleboxRelease.githubReleases)` (Owner, unlocked session, not major; the browser never calls GitHub): `{ refresh? }` → `{ status: "ok", repoUrl, checkedAt, stale, releases[≤10] }` or `{ status: "unavailable", reason: "rate_limited" \| "unreachable" \| "not_found", retryAt? }`; each release has `msi { name, url, sizeBytes, sha256 }` or a `problem`. Returns `{ state: idle \| loading \| ready \| error, refreshing, canRefresh, refresh() }` (`release/githubRunner.ts`, shared by live and demo): one call when `enabled` (pass `useCan("owner")`), never polls, last `ok` answer kept 5 min in memory, Refresh locked 30 s, late answers dropped. The server caches in memory (10 min, ETag, 30 s gap): 0 database reads beyond the member check, nothing stored. Demo: a fake list after 500 ms, `?demoReleases=empty\|unavailable\|rate\|stale` for the other states | live |
 
 ## Enrollment-code hooks (`data/enrollment/`, plan Step 6)
 

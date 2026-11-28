@@ -363,7 +363,8 @@ describe("SSRF and size guards", () => {
   });
 
   test("HTTP errors", async () => {
-    expect((await failure({ [PAGE]: { status: 404 } })).r).toEqual({ ok: false, reason: "status", status: 404 });
-    expect((await failure({ [PAGE]: { status: 500 } })).r).toEqual({ ok: false, reason: "status", status: 500 });
+    // A `status` failure also carries the answer's headers (an ETag, rate-limit headers: `lib/githubReleases.ts`).
+    expect((await failure({ [PAGE]: { status: 404 } })).r).toMatchObject({ ok: false, reason: "status", status: 404, headers: expect.any(Headers) });
+    expect((await failure({ [PAGE]: { status: 500 } })).r).toMatchObject({ ok: false, reason: "status", status: 500, headers: expect.any(Headers) });
   });
 });

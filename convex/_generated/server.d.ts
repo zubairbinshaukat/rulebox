@@ -39,6 +39,7 @@ type Env = {
   readonly RULEBOX_POLICY_KEY: string | undefined;
   readonly RULEBOX_POLICY_KEY_NEXT: string | undefined;
   readonly RULEBOX_RECOVERY_PEPPER: string | undefined;
+  readonly RULEBOX_RELEASES_REPO: string | undefined;
   readonly RULEBOX_WEBAUTHN_ORIGINS: string | undefined;
   readonly RULEBOX_WEBAUTHN_RP_ID: string | undefined;
   readonly RULEBOX_WEBAUTHN_RP_NAME: string | undefined;
